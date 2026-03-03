@@ -1,33 +1,74 @@
-# Variables
-IMAGE = coreos.img
-# Cargo produces a binary named 'kernel' (no extension) in this specific path
+# =========================
+# Directories
+# =========================
+
+BUILD_DIR = build
+ESP_DIR   = $(BUILD_DIR)/esp
+EFI_BOOT  = $(ESP_DIR)/EFI/BOOT
+
+IMAGE     = $(BUILD_DIR)/coreos.img
+
+# =========================
+# Kernel (Rust)
+# =========================
+
 KERNEL_ELF = kernel/target/x86_64-unknown-none/release/kernel
-KERNEL_BIN = kernel.bin
-LOADER_EFI = BOOTX64.EFI
+KERNEL_BIN = $(ESP_DIR)/kernel.bin
 
-# Compilation Flags
-CFLAGS = -target x86_64-pc-win32 -I/usr/include/efi -I/usr/include/efi/x86_64 -ffreestanding -fshort-wchar -mno-red-zone
-LDFLAGS = /subsystem:efi_application /entry:efi_main /base:0x0 /align:4096
+# =========================
+# Bootloader (C UEFI)
+# =========================
 
-.PHONY: all clean run
+LOADER_SRC = bootloader/main.c
+LOADER_EFI = $(EFI_BOOT)/BOOTX64.EFI
+
+CFLAGS  = -target x86_64-pc-win32 \
+          -I/usr/include/efi \
+          -I/usr/include/efi/x86_64 \
+          -ffreestanding -fshort-wchar -mno-red-zone
+
+LDFLAGS = /subsystem:efi_application \
+          /entry:efi_main \
+          /base:0x0 \
+          /align:4096
+
+.PHONY: all clean run dirs
 
 all: $(IMAGE)
 
-# 1. Build Rust Kernel using Cargo
-$(KERNEL_BIN): kernel/src/main.rs kernel/linker.ld
-	cd kernel && cargo build --release --target x86_64-unknown-none
-	# -S removes debug symbols/tables but keeps all functional code/data sections
-	objcopy -O binary $(KERNEL_ELF) $(KERNEL_BIN)
-	
-# 2. Build C Loader
-$(LOADER_EFI): main.c
-	@echo "Building UEFI Loader..."
-	clang $(CFLAGS) -c main.c -o main.o
-	lld-link $(LDFLAGS) /out:$(LOADER_EFI) main.o
+# =========================
+# Create Build Directories
+# =========================
 
-# 3. Build Disk Image
+dirs:
+	mkdir -p $(EFI_BOOT)
+
+# =========================
+# Build Rust Kernel
+# =========================
+
+$(KERNEL_BIN): dirs
+	cd kernel && \
+	rustup override set nightly && \
+	cargo build --release \
+	    -Zbuild-std=core,alloc \
+	    --target x86_64-unknown-none
+	objcopy -O binary $(KERNEL_ELF) $(KERNEL_BIN)
+
+# =========================
+# Build UEFI Bootloader
+# =========================
+
+$(LOADER_EFI): dirs $(LOADER_SRC)
+	clang $(CFLAGS) -c $(LOADER_SRC) -o $(BUILD_DIR)/main.o
+	lld-link $(LDFLAGS) /out:$(LOADER_EFI) $(BUILD_DIR)/main.o
+	rm $(BUILD_DIR)/main.o
+
+# =========================
+# Build Disk Image
+# =========================
+
 $(IMAGE): $(KERNEL_BIN) $(LOADER_EFI)
-	@echo "Creating Disk Image..."
 	dd if=/dev/zero of=$(IMAGE) bs=1M count=64
 	mkfs.fat -F 32 $(IMAGE)
 	mmd -i $(IMAGE) ::/EFI
@@ -35,16 +76,23 @@ $(IMAGE): $(KERNEL_BIN) $(LOADER_EFI)
 	mcopy -i $(IMAGE) $(LOADER_EFI) ::/EFI/BOOT/
 	mcopy -i $(IMAGE) $(KERNEL_BIN) ::/
 
-# 4. Run in QEMU
+# =========================
+# Run in QEMU
+# =========================
+
 run: $(IMAGE)
-	qemu-system-x86_64 -bios /usr/share/ovmf/x64/OVMF.4m.fd \
+	qemu-system-x86_64 \
+		-bios /usr/share/ovmf/x64/OVMF.4m.fd \
 		-drive file=$(IMAGE),format=raw,if=ide \
 		-net none \
 		-serial stdio \
 		-vga std \
 		-m 512M
 
-# 5. Clean up
+# =========================
+# Clean
+# =========================
+
 clean:
-	rm -rf *.o *.EFI *.img *.bin
+	rm -rf $(BUILD_DIR)
 	cd kernel && cargo clean
