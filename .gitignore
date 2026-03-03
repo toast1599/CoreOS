@@ -1,0 +1,12 @@
+# Rust
+kernel/target/
+**/*.o
+
+# Build output
+build/
+*.img
+*.bin
+BOOTX64.EFI
+
+# Firmware vars
+NvVars
