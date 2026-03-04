@@ -110,6 +110,24 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
 
             if c != '\0' {
                 match c {
+                    '\x08' => {
+                        shell.pop();
+                        vga::clear_line(current_y, global_scale, boot_info);
+
+                        let mut redraw = Console {
+                            x: 20,
+                            y: current_y,
+                            color: vga::TEXT_COLOR,
+                            scale: global_scale,
+                            boot_info,
+                        };
+
+                        let _ = write!(redraw, "> ");
+                        for i in 0..shell.cursor {
+                            let _ = write!(redraw, "{}", shell.buffer[i]);
+                        }
+                    }
+
                     '\n' => {
                         current_y += 16 * global_scale;
                     
