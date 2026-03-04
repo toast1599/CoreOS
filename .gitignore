@@ -10,3 +10,6 @@ BOOTX64.EFI
 
 # Firmware vars
 NvVars
+
+# context
+.project_context.txt

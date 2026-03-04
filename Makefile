@@ -90,6 +90,32 @@ run: $(IMAGE)
 		-m 512M
 
 # =========================
+# Project Context Dump
+# =========================
+
+CONTEXT_FILE = .project_context.txt
+
+context:
+	@echo "Generating project context..."
+	@echo "# PROJECT CONTEXT DUMP - $(shell date)" > $(CONTEXT_FILE)
+	@echo "## Directory Tree" >> $(CONTEXT_FILE)
+	@tree -I 'target|build|.git' >> $(CONTEXT_FILE)
+	@echo "\n## Makefile" >> $(CONTEXT_FILE)
+	@cat Makefile >> $(CONTEXT_FILE)
+	@echo "\n## Bootloader Source" >> $(CONTEXT_FILE)
+	@cat $(LOADER_SRC) >> $(CONTEXT_FILE)
+	@echo "\n## Kernel Configuration" >> $(CONTEXT_FILE)
+	@cat kernel/Cargo.toml >> $(CONTEXT_FILE)
+	@cat kernel/linker.ld >> $(CONTEXT_FILE)
+	@echo "\n## Kernel Source" >> $(CONTEXT_FILE)
+	@find kernel/src -name "*.rs" -exec echo "\n--- File: {} ---" \; -exec cat {} \; >> $(CONTEXT_FILE)
+	@echo "Context written to $(CONTEXT_FILE)"
+
+copy: context
+	@cat $(CONTEXT_FILE) | wl-copy
+	@echo "Context copied to clipboard."
+
+# =========================
 # Clean
 # =========================
 
