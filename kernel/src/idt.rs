@@ -19,6 +19,7 @@ core::arch::global_asm!(r#"
 .extern pit_handler
 
 pit_interrupt:
+    cli
     push rax
     push rbx
     push rcx
@@ -56,7 +57,9 @@ pit_interrupt:
     pop rcx
     pop rbx
     pop rax
-
+    
+    sti
+    
     iretq
 
 .global keyboard_interrupt

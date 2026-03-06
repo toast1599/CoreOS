@@ -11,6 +11,8 @@ mod hw;
 mod fs;
 mod heap;
 mod idt;
+mod task;
+mod scheduler;
 
 use core::fmt::Write;
 use core::panic::PanicInfo;
@@ -61,6 +63,14 @@ fn command_is(buffer: &[char; 64], cmd: &str) -> bool {
     buffer[i] == '\0' || buffer[i] == ' '
 }
 
+fn demo_task() {
+    loop {
+        for _ in 0..1_000_000 {
+            core::hint::spin_loop();
+        }
+    }
+}
+
 #[export_name = "_start"]
 #[link_section = ".text._start"]
 pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> ! {
@@ -83,6 +93,10 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
     
     v.push(42);
     v.push(1337);
+
+    unsafe {
+        task::add_task(demo_task);
+    }
     
     let width = core::ptr::read_unaligned(core::ptr::addr_of!((*boot_info).width)) as usize;
     let height = core::ptr::read_unaligned(core::ptr::addr_of!((*boot_info).height)) as usize;
@@ -195,12 +209,37 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
                         }
 
                         // =====================
+                        // UPTIME
+                        // =====================
+                        else if command_is(&shell.buffer, "uptime") {
+                            let seconds = hw::pit::uptime_seconds();
+                            let _ = write!(resp, "Uptime: {} seconds", seconds);
+                            current_y += 16 * global_scale;
+                        }
+
+                        // =====================
                         // TICKS
                         // =====================
                         else if command_is(&shell.buffer, "ticks") {
                             let t = hw::pit::ticks();
                             let _ = write!(resp, "Kernel ticks: {}", t);
                             current_y += 16 * global_scale;
+                        }
+
+                        // =====================
+                        // SLEEP
+                        // =====================
+                        else if command_is(&shell.buffer, "sleep") {
+                            let arg = get_arg_chars(&shell.buffer, 5);
+                        
+                            let mut n: u64 = 0;
+                            for c in arg {
+                                if *c >= '0' && *c <= '9' {
+                                    n = n * 10 + (*c as u64 - '0' as u64);
+                                }
+                            }
+                        
+                            hw::pit::sleep(n * 100); // 100 ticks = 1 second
                         }
                         
                         // =====================

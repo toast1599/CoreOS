@@ -2,9 +2,9 @@ use core::fmt::Write;
 use core::ptr::addr_of;
 use crate::boot::{CoreOS_BootInfo, FONT};
 
-pub const BG_COLOR: u32    = 0x000D1117; // Near-black blue
-pub const TEXT_COLOR: u32  = 0x00C9D1D9; // Cool gray
-pub const CLOCK_COLOR: u32 = 0x0058A6FF; // Clean electric blue
+pub const BG_COLOR: u32    = 0x00282828; // Dark hard-charcoal
+pub const TEXT_COLOR: u32  = 0x00EBDBB2; // Retro cream/bone
+pub const CLOCK_COLOR: u32 = 0x00FABD2F; // Industrial yellow-gold
 
 pub struct Console {
     pub x: usize,
