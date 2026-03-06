@@ -10,6 +10,7 @@ mod vga;
 mod hw;
 mod fs;
 mod heap;
+mod idt;
 
 use core::fmt::Write;
 use core::panic::PanicInfo;
@@ -64,16 +65,19 @@ fn command_is(buffer: &[char; 64], cmd: &str) -> bool {
 #[link_section = ".text._start"]
 pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> ! {
 
-    unsafe {
-        FILESYSTEM = Some(fs::RamFS::new());
-    }
-
     core::arch::asm!(
-        "lea rsp, [{stack} + 16384]",
+        "lea rsp, [{stack} + 1048576]",
         stack = sym STACK,
         options(nostack, nomem)
     );
 
+    FILESYSTEM = Some(fs::RamFS::new());
+
+    idt::init_idt();
+    hw::pit::init_pit();
+
+    core::arch::asm!("sti");
+    
     use alloc::vec::Vec;
     let mut v = Vec::new();
     

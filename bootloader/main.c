@@ -1,5 +1,6 @@
 #include <efi.h>
 #include <stdint.h>
+#include <efilib.h>
 
 #pragma pack(push, 1)
 typedef struct {
@@ -33,15 +34,46 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
     EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *fs;
     SystemTable->BootServices->HandleProtocol(loaded_image->DeviceHandle, &sfspGuid, (void**)&fs);
     
-    EFI_FILE_PROTOCOL *root, *kernel_file;
-    fs->OpenVolume(fs, &root);
-    status = root->Open(root, &kernel_file, L"kernel.bin", EFI_FILE_MODE_READ, 0);
-    
-    EFI_PHYSICAL_ADDRESS kernel_addr = 0x100000;
-    SystemTable->BootServices->AllocatePages(AllocateAddress, EfiLoaderData, 512, &kernel_addr);
-    
-    UINTN fileSize = 1024 * 1024; 
-    kernel_file->Read(kernel_file, &fileSize, (void*)kernel_addr);
+EFI_FILE_PROTOCOL *root, *kernel_file;
+fs->OpenVolume(fs, &root);
+status = root->Open(root, &kernel_file, L"kernel.bin", EFI_FILE_MODE_READ, 0);
+
+/* -------------------------------
+   Get kernel file size
+--------------------------------*/
+
+EFI_GUID fileInfoGuid = EFI_FILE_INFO_ID;
+
+UINTN infoSize = 0;
+kernel_file->GetInfo(kernel_file, &fileInfoGuid, &infoSize, NULL);
+
+EFI_FILE_INFO *fileInfo;
+SystemTable->BootServices->AllocatePool(EfiLoaderData, infoSize, (void**)&fileInfo);
+
+kernel_file->GetInfo(kernel_file, &fileInfoGuid, &infoSize, fileInfo);
+
+UINTN fileSize = fileInfo->FileSize;
+
+/* -------------------------------
+   Allocate memory for kernel
+--------------------------------*/
+
+UINTN pages = (fileSize + 0xFFF) / 0x1000;
+
+EFI_PHYSICAL_ADDRESS kernel_addr = 0x100000;
+
+SystemTable->BootServices->AllocatePages(
+    AllocateAddress,
+    EfiLoaderData,
+    pages,
+    &kernel_addr
+);
+
+/* -------------------------------
+   Read kernel into memory
+--------------------------------*/
+
+kernel_file->Read(kernel_file, &fileSize, (void*)kernel_addr);
 
     // 2. Capture GOP data
     bInfo.fb_base = (uint64_t)gop->Mode->FrameBufferBase;

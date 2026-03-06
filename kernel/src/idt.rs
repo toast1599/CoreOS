@@ -1,4 +1,5 @@
 use core::mem::size_of;
+use crate::hw::pit::pit_handler;
 
 #[repr(C, packed)]
 #[derive(Clone, Copy)]
@@ -13,37 +14,92 @@ struct IDTEntry {
 
 core::arch::global_asm!(r#"
 .intel_syntax noprefix
-.global keyboard_interrupt
-.extern keyboard_handler
 
-keyboard_interrupt:
+.global pit_interrupt
+.extern pit_handler
+
+pit_interrupt:
     push rax
     push rbx
     push rcx
     push rdx
     push rsi
     push rdi
+    push rbp
     push r8
     push r9
     push r10
     push r11
+    push r12
+    push r13
+    push r14
+    push r15
 
-    call keyboard_handler
+    mov rdi, rsp
+    call pit_handler
 
     mov al, 0x20
     out 0x20, al
 
+    pop r15
+    pop r14
+    pop r13
+    pop r12
     pop r11
     pop r10
     pop r9
     pop r8
+    pop rbp
     pop rdi
     pop rsi
     pop rdx
     pop rcx
     pop rbx
     pop rax
+
     iretq
+
+.global keyboard_interrupt
+.extern keyboard_handler
+
+keyboard_interrupt:
+    push r15
+    push r14
+    push r13
+    push r12
+    push r11
+    push r10
+    push r9
+    push r8
+    push rbp
+    push rdi
+    push rsi
+    push rdx
+    push rcx
+    push rbx
+    push rax
+
+    call keyboard_handler
+
+    mov al, 0x20
+    out 0x20, al
+
+    pop rax
+    pop rbx
+    pop rcx
+    pop rdx
+    pop rsi
+    pop rdi
+    pop rbp
+    pop r8
+    pop r9
+    pop r10
+    pop r11
+    pop r12
+    pop r13
+    pop r14
+    pop r15
+    iretq    
 "#);
 
 impl IDTEntry {
@@ -58,10 +114,10 @@ impl IDTEntry {
         }
     }
 
-    fn set_handler(&mut self, handler: extern "C" fn()) {
+    fn set_handler(&mut self, handler: unsafe extern "C" fn()) {
         let addr = handler as u64;
         self.offset_low = addr as u16;
-        self.selector = 0x08; // kernel code segment
+        self.selector = 0x38; // kernel code segment
         self.options = 0x8E00; // present, interrupt gate
         self.offset_mid = (addr >> 16) as u16;
         self.offset_high = (addr >> 32) as u32;
@@ -79,9 +135,11 @@ static mut IDT: [IDTEntry; 256] = [IDTEntry::missing(); 256];
 
 extern "C" {
     fn keyboard_interrupt();
+    fn pit_interrupt();
 }
 
 pub unsafe fn init_idt() {
+    IDT[32].set_handler(pit_interrupt);
     IDT[33].set_handler(keyboard_interrupt);
 
     let idt_ptr = IDTPointer {
@@ -90,7 +148,31 @@ pub unsafe fn init_idt() {
     };
 
     core::arch::asm!("lidt [{}]", in(reg) &idt_ptr);
+    // remap PIC
+    core::arch::asm!("mov al, 0x11");
+    core::arch::asm!("out 0x20, al");
+    core::arch::asm!("out 0xA0, al");
+    
+    core::arch::asm!("mov al, 0x20");
+    core::arch::asm!("out 0x21, al");
+    
+    core::arch::asm!("mov al, 0x28");
+    core::arch::asm!("out 0xA1, al");
+    
+    core::arch::asm!("mov al, 0x04");
+    core::arch::asm!("out 0x21, al");
+    
+    core::arch::asm!("mov al, 0x02");
+    core::arch::asm!("out 0xA1, al");
+    
+    core::arch::asm!("mov al, 0x01");
+    core::arch::asm!("out 0x21, al");
+    core::arch::asm!("out 0xA1, al");
+    
+    // enable only timer interrupt
+    core::arch::asm!("mov al, 0xFE");
+    core::arch::asm!("out 0x21, al");
     core::arch::asm!("mov al, 0xFF");
-    core::arch::asm!("out 0x21, al"); // mask master PIC
-    core::arch::asm!("out 0xA1, al"); // mask slave PIC
+    core::arch::asm!("out 0xA1, al");
+
 }

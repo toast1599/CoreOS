@@ -87,7 +87,8 @@ run: $(IMAGE)
 		-net none \
 		-serial stdio \
 		-vga std \
-		-m 512M
+		-m 512M \
+		-d int,cpu_reset
 
 # =========================
 # Project Context Dump
