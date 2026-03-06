@@ -155,7 +155,7 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
                             vga::clear_from(120, boot_info);
                             current_y = 120;
                         }
-                    
+                        
                         // =====================
                         // LS
                         // =====================
@@ -193,7 +193,16 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
                     
                             current_y += 16 * global_scale;
                         }
-                    
+
+                        // =====================
+                        // TICKS
+                        // =====================
+                        else if command_is(&shell.buffer, "ticks") {
+                            let t = hw::pit::ticks();
+                            let _ = write!(resp, "Kernel ticks: {}", t);
+                            current_y += 16 * global_scale;
+                        }
+                        
                         // =====================
                         // WRITE (overwrite)
                         // =====================
