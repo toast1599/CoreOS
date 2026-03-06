@@ -311,6 +311,23 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
                         }
 
                         // =====================
+                        // RM
+                        // =====================
+                        else if command_is(&shell.buffer, "rm") {
+                            let filename = get_arg_chars(&shell.buffer, 2);
+                        
+                            if let Some(fs) = unsafe { FILESYSTEM.as_mut() } {
+                                if fs.remove(filename) {
+                                    let _ = write!(resp, "File removed.");
+                                } else {
+                                    let _ = write!(resp, "Error: file not found.");
+                                }
+                            }
+                        
+                            current_y += 16 * global_scale;
+                        }
+
+                        // =====================
                         // FONT
                         // =====================
                         else if command_is(&shell.buffer, "font") {

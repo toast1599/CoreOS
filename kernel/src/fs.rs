@@ -41,4 +41,13 @@ impl RamFS {
     pub fn find(&self, name: &[char]) -> Option<&File> {
         self.files.iter().find(|f| f.name == name)
     }
+
+    pub fn remove(&mut self, name: &[char]) -> bool {
+        if let Some(pos) = self.files.iter().position(|f| f.name == name) {
+            self.files.remove(pos);
+            true
+        } else {
+            false
+        }
+    }
 }
