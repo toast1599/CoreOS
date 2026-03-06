@@ -38,8 +38,11 @@ static mut FILESYSTEM: Option<fs::RamFS> = None;
 pub extern "C" fn keyboard_handler() {
     unsafe {
         let scancode = hw::ps2::read_data();
-        // For now, just ignore it or store it later
-        let _ = scancode;
+        let c = hw::ps2::scancode_to_char(scancode);
+
+        if c != '\0' {
+            hw::kbd_buffer::KEYBUF.push(c);
+        }
     }
 }
 
@@ -112,7 +115,7 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
 
     let mut line = Console { x: 20, y: current_y, color: vga::TEXT_COLOR, scale: global_scale, boot_info };
     let _ = write!(line, "> ");
-
+        
     loop {
         let (h, m, s) = hw::rtc::get_time();
 
@@ -122,11 +125,7 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
         let mut clock = Console { x: clock_x, y: 20, color: vga::CLOCK_COLOR, scale: 2, boot_info };
         let _ = write!(clock, "{:02}:{:02}:{:02}", h, m, s);
 
-        if (hw::ps2::read_status() & 0x01) != 0 {
-            let scancode = hw::ps2::read_data();
-            let c = hw::ps2::scancode_to_char(scancode);
-
-            if c != '\0' {
+        if let Some(c) = hw::kbd_buffer::KEYBUF.pop() {
                 match c {
                     '\x08' => {
                         shell.pop();
@@ -153,7 +152,7 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
                             vga::clear_from(120, boot_info);
                             current_y = 120;
                         }
-                    
+                                            
                         let mut resp = Console {
                             x: 20,
                             y: current_y,
@@ -379,9 +378,15 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
                 }
             }
         }
-        for _ in 0..50_000 { core::arch::asm!("nop"); }
+        
+        for _ in 0..50_000 { 
+            core::arch::asm!("nop");
+        } 
+
+    loop {
+        core::arch::asm!("hlt")
     }
-}
+    } 
 
 struct Shell {
     buffer: [char; 64],

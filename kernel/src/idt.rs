@@ -172,8 +172,8 @@ pub unsafe fn init_idt() {
     core::arch::asm!("out 0x21, al");
     core::arch::asm!("out 0xA1, al");
     
-    // enable only timer interrupt
-    core::arch::asm!("mov al, 0xFE");
+    // enable timer and keyboard
+    core::arch::asm!("mov al, 0xFC");
     core::arch::asm!("out 0x21, al");
     core::arch::asm!("mov al, 0xFF");
     core::arch::asm!("out 0xA1, al");

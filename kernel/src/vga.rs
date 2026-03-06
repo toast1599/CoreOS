@@ -96,3 +96,4 @@ pub unsafe fn clear_line(y: usize, scale: usize, boot_info: *const CoreOS_BootIn
 
     draw_rect(0, y, width, 16 * scale, BG_COLOR, boot_info);
 }
+

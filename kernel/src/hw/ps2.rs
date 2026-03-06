@@ -1,5 +1,6 @@
 pub static mut SH_PRESSED: bool = false;
 pub static mut CAPS_LOCK: bool = false;
+static mut EXTENDED: bool = false;
 
 pub unsafe fn read_status() -> u8 {
     let status: u8;

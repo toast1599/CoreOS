@@ -1,6 +1,7 @@
 pub mod rtc;
 pub mod ps2;
 pub mod pit;
+pub mod kbd_buffer;
 
 pub unsafe fn reboot() -> ! {
     // Pulse the CPU reset line via the PS/2 controller
