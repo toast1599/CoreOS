@@ -1,5 +1,4 @@
 use core::mem::size_of;
-use crate::hw::pit::pit_handler;
 
 #[repr(C, packed)]
 #[derive(Clone, Copy)]
@@ -13,8 +12,6 @@ struct IDTEntry {
 }
 
 core::arch::global_asm!(r#"
-.intel_syntax noprefix
-
 .global pit_interrupt
 .extern pit_handler
 
@@ -147,7 +144,7 @@ pub unsafe fn init_idt() {
 
     let idt_ptr = IDTPointer {
         limit: (size_of::<[IDTEntry; 256]>() - 1) as u16,
-        base: &IDT as *const _ as u64,
+        base: &raw const IDT as *const _ as u64
     };
 
     core::arch::asm!("lidt [{}]", in(reg) &idt_ptr);

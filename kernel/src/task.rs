@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 pub struct Task {
     pub stack: *mut u8,
     pub entry: fn(),

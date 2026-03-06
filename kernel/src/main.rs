@@ -1,4 +1,5 @@
 #![feature(alloc_error_handler)]
+#![allow(static_mut_refs)]
 
 #![no_std]
 #![no_main]
@@ -379,13 +380,6 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
             }
         }
         
-        for _ in 0..50_000 { 
-            core::arch::asm!("nop");
-        } 
-
-    loop {
-        core::arch::asm!("hlt")
-    }
     } 
 
 struct Shell {

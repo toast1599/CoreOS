@@ -28,7 +28,8 @@ unsafe impl GlobalAlloc for BumpAllocator {
         }
 
         NEXT = start + size;
-        HEAP.0.as_mut_ptr().add(start)
+        let heap_ptr = core::ptr::addr_of_mut!(HEAP.0) as *mut u8;
+        heap_ptr.add(start)
     }
 
     unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {

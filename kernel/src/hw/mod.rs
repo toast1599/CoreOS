@@ -14,6 +14,7 @@ pub unsafe fn reboot() -> ! {
     }
 }
 
+#[allow(dead_code)]
 pub unsafe fn shutdown() -> ! {
     // Magic exit for QEMU. On real hardware, this will just hang (safe fallback).
     core::arch::asm!("out dx, ax", in("dx") 0x604u16, in("ax") 0x2000u16);
