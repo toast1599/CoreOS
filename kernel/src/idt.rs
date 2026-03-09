@@ -57,8 +57,6 @@ pit_interrupt:
     pop rbx
     pop rax
     
-    sti
-    
     iretq
 
 .global keyboard_interrupt
@@ -155,6 +153,7 @@ pub unsafe fn init_idt() {
     };
 
     core::arch::asm!("lidt [{}]", in(reg) &idt_ptr);
+    crate::dbg_log!("IDT", "IDT loaded, {} entries", IDT.len());
     // remap PIC
     core::arch::asm!("mov al, 0x11");
     core::arch::asm!("out 0x20, al");

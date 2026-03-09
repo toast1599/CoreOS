@@ -24,14 +24,30 @@ unsafe impl GlobalAlloc for BumpAllocator {
         }
 
         if start + size > HEAP_SIZE {
+            crate::dbg_log!(
+                "HEAP",
+                "OOM! requested={} align={} next={}",
+                size,
+                layout.align(),
+                NEXT
+            );
             return null_mut();
         }
 
         NEXT = start + size;
         let heap_ptr = core::ptr::addr_of_mut!(HEAP.0) as *mut u8;
-        heap_ptr.add(start)
+        let ptr = heap_ptr.add(start);
+        crate::dbg_log!(
+            "HEAP",
+            "alloc size={} align={} -> ptr={:#x} (used={}/{})",
+            size,
+            layout.align(),
+            ptr as usize,
+            NEXT,
+            HEAP_SIZE
+        );
+        ptr
     }
-
     unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {
         // no-op for bump allocator
     }

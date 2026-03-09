@@ -6,6 +6,7 @@
 extern crate alloc;
 
 mod boot;
+mod debug;
 mod fs;
 mod heap;
 mod hw;
@@ -29,9 +30,6 @@ use core::alloc::Layout;
 fn alloc_error(_layout: Layout) -> ! {
     loop {}
 }
-
-#[no_mangle]
-static mut STACK: [u8; 1024 * 1024] = [0; 1024 * 1024];
 
 static mut FILESYSTEM: Option<fs::RamFS> = None;
 #[no_mangle]
@@ -81,14 +79,26 @@ fn demo_task() {
 #[export_name = "_start"]
 #[link_section = ".text._start"]
 pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> ! {
+    // Zero BSS first, before anything else
+    extern "C" {
+        static mut __bss_start: u8;
+        static mut __bss_end: u8;
+    }
+    let bss_start = &raw mut __bss_start as *mut u8;
+    let bss_end = &raw mut __bss_end as *mut u8;
+    let bss_size = bss_end as usize - bss_start as usize;
+    core::ptr::write_bytes(bss_start, 0, bss_size);
+
     serial::write_str("kernel start\n");
 
+    extern "C" {
+        static __stack_top: u8;
+    }
     core::arch::asm!(
-        "lea rsp, [{stack} + 1048576]",
-        stack = sym STACK,
+        "lea rsp, [{stack}]",
+        stack = sym __stack_top,
         options(nostack, nomem)
     );
-
     serial::write_str("stage1\n");
 
     FILESYSTEM = Some(fs::RamFS::new());
@@ -104,20 +114,30 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
     serial::write_str("stage4\n");
 
     core::arch::asm!("sti");
+    serial::write_str("sti done\n");
 
     use alloc::vec::Vec;
     let mut v = Vec::new();
+    serial::write_str("vec created\n");
 
     v.push(42);
+    serial::write_str("push 42\n");
+
     v.push(1337);
+    serial::write_str("push 1337\n");
 
     unsafe {
         task::add_task(demo_task);
     }
+    serial::write_str("task added\n");
 
     let width = core::ptr::read_unaligned(core::ptr::addr_of!((*boot_info).width)) as usize;
     let height = core::ptr::read_unaligned(core::ptr::addr_of!((*boot_info).height)) as usize;
+    serial::write_str("boot info read\n");
+
     vga::draw_rect(0, 0, width, height, vga::BG_COLOR, boot_info);
+    serial::write_str("screen cleared\n");
+
     let mut global_scale: usize = 1;
     let mut current_y = 120;
 
@@ -128,7 +148,7 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
         scale: 2,
         boot_info,
     };
-    let _ = write!(header, "CoreOS Shell v0.1.0");
+    let _ = write!(header, "CoreOS Shell v0.01");
     vga::draw_rect(20, 60, 550, 4, vga::CLOCK_COLOR, boot_info);
 
     let mut shell = Shell::new();
@@ -146,6 +166,9 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
         let (h, m, s) = hw::rtc::get_time();
 
         let clock_x = width - 150;
+        let pitch =
+            unsafe { core::ptr::read_unaligned(core::ptr::addr_of!((*boot_info).pitch)) as usize };
+
         vga::draw_rect(clock_x, 20, 130, 32, vga::BG_COLOR, boot_info);
 
         let mut clock = Console {
@@ -155,9 +178,46 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
             scale: 2,
             boot_info,
         };
-        let _ = write!(clock, "{:02}:{:02}:{:02}", h, m, s);
+        unsafe {
+            unsafe fn d(con: &mut Console, n: u8) {
+                vga::putchar(
+                    ('0' as u8 + n / 10) as char,
+                    con.x,
+                    con.y,
+                    con.color,
+                    con.scale,
+                    con.boot_info,
+                );
+                con.x += 8 * con.scale;
+                vga::putchar(
+                    ('0' as u8 + n % 10) as char,
+                    con.x,
+                    con.y,
+                    con.color,
+                    con.scale,
+                    con.boot_info,
+                );
+                con.x += 8 * con.scale;
+            }
+            unsafe fn colon(con: &mut Console) {
+                vga::putchar(':', con.x, con.y, con.color, con.scale, con.boot_info);
+                con.x += 8 * con.scale;
+            }
+            d(&mut clock, h);
+            colon(&mut clock);
+            d(&mut clock, m);
+            colon(&mut clock);
+            d(&mut clock, s);
+        }
 
-        if let Some(c) = hw::kbd_buffer::KEYBUF.pop() {
+        let key = unsafe {
+            core::arch::asm!("cli", options(nostack, nomem));
+            let k = hw::kbd_buffer::KEYBUF.pop();
+            core::arch::asm!("sti", options(nostack, nomem));
+            k
+        };
+
+        if let Some(c) = key {
             match c {
                 '\x08' => {
                     shell.pop();
@@ -192,6 +252,23 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
                         scale: global_scale,
                         boot_info,
                     };
+
+                    unsafe {
+                        core::arch::asm!("cli", options(nostack, nomem));
+                    }
+                    crate::serial::write_str("[SHELL] cmd: [");
+                    for i in 0..shell.cursor {
+                        let c = shell.buffer[i];
+                        if c != '\0' {
+                            unsafe {
+                                crate::serial::write_byte(c as u8);
+                            }
+                        }
+                    }
+                    crate::serial::write_str("]\n");
+                    unsafe {
+                        core::arch::asm!("sti", options(nostack, nomem));
+                    }
 
                     // =====================
                     // CLEAR
@@ -398,18 +475,25 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
                     let _ = write!(next_line, "> ");
                 }
                 _ => {
-                    shell.push(c);
-                    vga::clear_line(current_y, global_scale, boot_info);
-                    let mut redraw = Console {
-                        x: 20,
-                        y: current_y,
-                        color: vga::TEXT_COLOR,
-                        scale: global_scale,
-                        boot_info,
-                    };
-                    let _ = write!(redraw, "> ");
-                    for i in 0..shell.cursor {
-                        let _ = write!(redraw, "{}", shell.buffer[i]);
+                    let max_chars = (width - 40) / (8 * global_scale) - 2;
+                    if shell.cursor < max_chars && shell.cursor < 63 {
+                        shell.push(c);
+                        vga::clear_line(current_y, global_scale, boot_info);
+                        let mut redraw = Console {
+                            x: 20,
+                            y: current_y,
+                            color: vga::TEXT_COLOR,
+                            scale: global_scale,
+                            boot_info,
+                        };
+                        let _ = write!(redraw, "> ");
+                        for i in 0..shell.cursor {
+                            let _ = write!(redraw, "{}", shell.buffer[i]);
+                        }
+
+                        unsafe {
+                            crate::serial_fmt!("tick={}\n", hw::pit::ticks());
+                        }
                     }
                 }
             }
@@ -458,11 +542,22 @@ extern "C" fn default_exception() {
 }
 
 #[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
+fn panic(info: &PanicInfo) -> ! {
     unsafe {
-        serial::write_str("PERNEL KANIC\n");
+        serial::write_str("[PERNEL KANIC - !] ");
     }
-
+    if let Some(msg) = info.message().as_str() {
+        unsafe {
+            serial::write_str(msg);
+        }
+    }
+    if let Some(loc) = info.location() {
+        crate::serial_fmt!(" @ {}:{}\n", loc.file(), loc.line());
+    } else {
+        unsafe {
+            serial::write_str("\n");
+        }
+    }
     loop {
         unsafe {
             core::arch::asm!("hlt");
