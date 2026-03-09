@@ -1,3 +1,4 @@
+use crate::default_exception;
 use core::mem::size_of;
 
 #[repr(C, packed)]
@@ -11,7 +12,8 @@ struct IDTEntry {
     zero: u32,
 }
 
-core::arch::global_asm!(r#"
+core::arch::global_asm!(
+    r#"
 .global pit_interrupt
 .extern pit_handler
 
@@ -100,7 +102,8 @@ keyboard_interrupt:
     pop r14
     pop r15
     iretq    
-"#);
+"#
+);
 
 impl IDTEntry {
     const fn missing() -> Self {
@@ -139,12 +142,16 @@ extern "C" {
 }
 
 pub unsafe fn init_idt() {
+    for i in 0..30 {
+        IDT[i].set_handler(default_exception);
+    }
+
     IDT[32].set_handler(pit_interrupt);
     IDT[33].set_handler(keyboard_interrupt);
 
     let idt_ptr = IDTPointer {
         limit: (size_of::<[IDTEntry; 256]>() - 1) as u16,
-        base: &raw const IDT as *const _ as u64
+        base: &raw const IDT as *const _ as u64,
     };
 
     core::arch::asm!("lidt [{}]", in(reg) &idt_ptr);
@@ -152,27 +159,26 @@ pub unsafe fn init_idt() {
     core::arch::asm!("mov al, 0x11");
     core::arch::asm!("out 0x20, al");
     core::arch::asm!("out 0xA0, al");
-    
+
     core::arch::asm!("mov al, 0x20");
     core::arch::asm!("out 0x21, al");
-    
+
     core::arch::asm!("mov al, 0x28");
     core::arch::asm!("out 0xA1, al");
-    
+
     core::arch::asm!("mov al, 0x04");
     core::arch::asm!("out 0x21, al");
-    
+
     core::arch::asm!("mov al, 0x02");
     core::arch::asm!("out 0xA1, al");
-    
+
     core::arch::asm!("mov al, 0x01");
     core::arch::asm!("out 0x21, al");
     core::arch::asm!("out 0xA1, al");
-    
+
     // enable timer and keyboard
     core::arch::asm!("mov al, 0xFC");
     core::arch::asm!("out 0x21, al");
     core::arch::asm!("mov al, 0xFF");
     core::arch::asm!("out 0xA1, al");
-
 }
