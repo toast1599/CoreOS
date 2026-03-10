@@ -1,3 +1,6 @@
+// Copyright (c) 2026 toast1599
+// SPDX-License-Identifier: GPL-3.0-only
+
 #include <efi.h>
 #include <stdint.h>
 #include <efilib.h>

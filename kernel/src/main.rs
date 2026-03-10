@@ -1,3 +1,6 @@
+// Copyright (c) 2026 toast1599
+// SPDX-License-Identifier: GPL-3.0-only
+
 #![feature(alloc_error_handler)]
 #![allow(static_mut_refs)]
 #![no_std]
