@@ -1,4 +1,5 @@
 use crate::default_exception;
+use crate::gdt::SEG_KCODE;
 use core::mem::size_of;
 
 #[repr(C, packed)]
@@ -36,10 +37,11 @@ pit_interrupt:
     push r15
 
     mov rdi, rsp
-    call pit_handler
 
     mov al, 0x20
     out 0x20, al
+
+    call pit_handler
 
     pop r15
     pop r14
@@ -56,7 +58,7 @@ pit_interrupt:
     pop rcx
     pop rbx
     pop rax
-    
+
     iretq
 
 .global keyboard_interrupt
@@ -99,7 +101,7 @@ keyboard_interrupt:
     pop r13
     pop r14
     pop r15
-    iretq    
+    iretq
 "#
 );
 
@@ -118,7 +120,7 @@ impl IDTEntry {
     fn set_handler(&mut self, handler: unsafe extern "C" fn()) {
         let addr = handler as u64;
         self.offset_low = addr as u16;
-        self.selector = 0x38; // kernel code segment
+        self.selector = SEG_KCODE; // our GDT kernel code segment
         self.options = 0x8E00; // present, interrupt gate
         self.offset_mid = (addr >> 16) as u16;
         self.offset_high = (addr >> 32) as u32;
@@ -153,8 +155,9 @@ pub unsafe fn init_idt() {
     };
 
     core::arch::asm!("lidt [{}]", in(reg) &idt_ptr);
-    crate::dbg_log!("IDT", "IDT loaded, {} entries", IDT.len());
-    // remap PIC
+    crate::dbg_log!("IDT", "loaded, {} entries", IDT.len());
+
+    // Remap PIC
     core::arch::asm!("mov al, 0x11");
     core::arch::asm!("out 0x20, al");
     core::arch::asm!("out 0xA0, al");
@@ -175,9 +178,10 @@ pub unsafe fn init_idt() {
     core::arch::asm!("out 0x21, al");
     core::arch::asm!("out 0xA1, al");
 
-    // enable timer and keyboard
+    // Enable timer and keyboard only
     core::arch::asm!("mov al, 0xFC");
     core::arch::asm!("out 0x21, al");
     core::arch::asm!("mov al, 0xFF");
     core::arch::asm!("out 0xA1, al");
 }
+
