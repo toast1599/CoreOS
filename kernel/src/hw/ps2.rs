@@ -1,322 +1,236 @@
-pub static mut SH_PRESSED: bool = false;
-pub static mut CAPS_LOCK: bool = false;
+/// PS/2 keyboard driver.
+///
+/// Keyboard modifier state (shift, caps-lock) is encapsulated in
+/// `KeyboardState` rather than exposed as raw mutable statics.
+use core::sync::atomic::{AtomicBool, Ordering};
 
-#[allow(dead_code)]
+// ---------------------------------------------------------------------------
+// I/O helpers
+// ---------------------------------------------------------------------------
+
+#[inline]
 pub unsafe fn read_status() -> u8 {
     let status: u8;
-    core::arch::asm!("in al, 0x64", out("al") status);
+    core::arch::asm!("in al, 0x64", out("al") status, options(nostack, nomem));
     status
 }
 
+#[inline]
 pub unsafe fn read_data() -> u8 {
     let data: u8;
-    core::arch::asm!("in al, 0x60", out("al") data);
+    core::arch::asm!("in al, 0x60", out("al") data, options(nostack, nomem));
     data
 }
 
-pub fn scancode_to_char(scancode: u8) -> char {
-    unsafe {
-        match scancode {
-            0x2A | 0x36 => {
-                SH_PRESSED = true;
-                '\0'
-            }
-            0xAA | 0xB6 => {
-                SH_PRESSED = false;
-                '\0'
-            }
-            0x3A => {
-                CAPS_LOCK = !CAPS_LOCK;
-                '\0'
-            }
-            0x39 => ' ',
-            0x1C => '\n',
-            0x0E => '\x08',
-            0x02 => {
-                if SH_PRESSED {
-                    '!'
-                } else {
-                    '1'
-                }
-            }
-            0x03 => {
-                if SH_PRESSED {
-                    '@'
-                } else {
-                    '2'
-                }
-            }
-            0x04 => {
-                if SH_PRESSED {
-                    '#'
-                } else {
-                    '3'
-                }
-            }
-            0x05 => {
-                if SH_PRESSED {
-                    '$'
-                } else {
-                    '4'
-                }
-            }
-            0x06 => {
-                if SH_PRESSED {
-                    '%'
-                } else {
-                    '5'
-                }
-            }
-            0x07 => {
-                if SH_PRESSED {
-                    '^'
-                } else {
-                    '6'
-                }
-            }
-            0x08 => {
-                if SH_PRESSED {
-                    '&'
-                } else {
-                    '7'
-                }
-            }
-            0x09 => {
-                if SH_PRESSED {
-                    '*'
-                } else {
-                    '8'
-                }
-            }
-            0x0A => {
-                if SH_PRESSED {
-                    '('
-                } else {
-                    '9'
-                }
-            }
-            0x0B => {
-                if SH_PRESSED {
-                    ')'
-                } else {
-                    '0'
-                }
-            }
-            0x0C => {
-                if SH_PRESSED {
-                    '_'
-                } else {
-                    '-'
-                }
-            }
-            0x0D => {
-                if SH_PRESSED {
-                    '+'
-                } else {
-                    '='
-                }
-            }
-            sc @ 0x10..=0x32 => {
-                let is_upper = SH_PRESSED ^ CAPS_LOCK;
-                match sc {
-                    0x1E => {
-                        if is_upper {
-                            'A'
-                        } else {
-                            'a'
-                        }
-                    }
-                    0x30 => {
-                        if is_upper {
-                            'B'
-                        } else {
-                            'b'
-                        }
-                    }
-                    0x2E => {
-                        if is_upper {
-                            'C'
-                        } else {
-                            'c'
-                        }
-                    }
-                    0x20 => {
-                        if is_upper {
-                            'D'
-                        } else {
-                            'd'
-                        }
-                    }
-                    0x12 => {
-                        if is_upper {
-                            'E'
-                        } else {
-                            'e'
-                        }
-                    }
-                    0x21 => {
-                        if is_upper {
-                            'F'
-                        } else {
-                            'f'
-                        }
-                    }
-                    0x22 => {
-                        if is_upper {
-                            'G'
-                        } else {
-                            'g'
-                        }
-                    }
-                    0x23 => {
-                        if is_upper {
-                            'H'
-                        } else {
-                            'h'
-                        }
-                    }
-                    0x17 => {
-                        if is_upper {
-                            'I'
-                        } else {
-                            'i'
-                        }
-                    }
-                    0x24 => {
-                        if is_upper {
-                            'J'
-                        } else {
-                            'j'
-                        }
-                    }
-                    0x25 => {
-                        if is_upper {
-                            'K'
-                        } else {
-                            'k'
-                        }
-                    }
-                    0x26 => {
-                        if is_upper {
-                            'L'
-                        } else {
-                            'l'
-                        }
-                    }
-                    0x32 => {
-                        if is_upper {
-                            'M'
-                        } else {
-                            'm'
-                        }
-                    }
-                    0x31 => {
-                        if is_upper {
-                            'N'
-                        } else {
-                            'n'
-                        }
-                    }
-                    0x18 => {
-                        if is_upper {
-                            'O'
-                        } else {
-                            'o'
-                        }
-                    }
-                    0x19 => {
-                        if is_upper {
-                            'P'
-                        } else {
-                            'p'
-                        }
-                    }
-                    0x10 => {
-                        if is_upper {
-                            'Q'
-                        } else {
-                            'q'
-                        }
-                    }
-                    0x13 => {
-                        if is_upper {
-                            'R'
-                        } else {
-                            'r'
-                        }
-                    }
-                    0x1F => {
-                        if is_upper {
-                            'S'
-                        } else {
-                            's'
-                        }
-                    }
-                    0x14 => {
-                        if is_upper {
-                            'T'
-                        } else {
-                            't'
-                        }
-                    }
-                    0x16 => {
-                        if is_upper {
-                            'U'
-                        } else {
-                            'u'
-                        }
-                    }
-                    0x2F => {
-                        if is_upper {
-                            'V'
-                        } else {
-                            'v'
-                        }
-                    }
-                    0x11 => {
-                        if is_upper {
-                            'W'
-                        } else {
-                            'w'
-                        }
-                    }
-                    0x2D => {
-                        if is_upper {
-                            'X'
-                        } else {
-                            'x'
-                        }
-                    }
-                    0x15 => {
-                        if is_upper {
-                            'Y'
-                        } else {
-                            'y'
-                        }
-                    }
-                    0x2C => {
-                        if is_upper {
-                            'Z'
-                        } else {
-                            'z'
-                        }
-                    }
-                    _ => '\0',
-                }
-            }
-            _ => {
-                if scancode < 0x80 {
-                    unsafe {
-                        core::arch::asm!("cli", options(nostack, nomem));
-                        crate::serial::write_str("[KBD] unmapped: 0x");
-                        crate::serial::write_byte(b"0123456789abcdef"[(scancode >> 4) as usize]);
-                        crate::serial::write_byte(b"0123456789abcdef"[(scancode & 0xF) as usize]);
-                        crate::serial::write_str("\n");
-                        core::arch::asm!("sti", options(nostack, nomem));
-                    }
-                }
-                '\0'
-            }
+// ---------------------------------------------------------------------------
+// Keyboard modifier state
+// ---------------------------------------------------------------------------
+
+/// Tracks shift and caps-lock state using atomics — safe to read from
+/// interrupt context without disabling interrupts.
+pub struct KeyboardState {
+    shift: AtomicBool,
+    caps_lock: AtomicBool,
+}
+
+impl KeyboardState {
+    pub const fn new() -> Self {
+        Self {
+            shift: AtomicBool::new(false),
+            caps_lock: AtomicBool::new(false),
         }
     }
+
+    #[inline]
+    fn shift(&self) -> bool {
+        self.shift.load(Ordering::Relaxed)
+    }
+    #[inline]
+    fn caps_lock(&self) -> bool {
+        self.caps_lock.load(Ordering::Relaxed)
+    }
+    #[inline]
+    fn set_shift(&self, v: bool) {
+        self.shift.store(v, Ordering::Relaxed);
+    }
+    #[inline]
+    fn toggle_caps(&self) {
+        let cur = self.caps_lock.load(Ordering::Relaxed);
+        self.caps_lock.store(!cur, Ordering::Relaxed);
+    }
 }
+
+pub static KBD_STATE: KeyboardState = KeyboardState::new();
+
+// ---------------------------------------------------------------------------
+// Scancode → char translation
+// ---------------------------------------------------------------------------
+
+/// Translate a PS/2 Set-1 scancode into a character.
+/// Returns `'\0'` for non-printable or modifier keys.
+pub fn scancode_to_char(scancode: u8) -> char {
+    let state = &KBD_STATE;
+
+    match scancode {
+        // Shift press / release
+        0x2A | 0x36 => {
+            state.set_shift(true);
+            '\0'
+        }
+        0xAA | 0xB6 => {
+            state.set_shift(false);
+            '\0'
+        }
+
+        // Caps Lock toggle
+        0x3A => {
+            state.toggle_caps();
+            '\0'
+        }
+
+        // Whitespace / control
+        0x39 => ' ',
+        0x1C => '\n',
+        0x0E => '\x08', // backspace
+
+        // Number row (unshifted / shifted)
+        0x02 => {
+            if state.shift() {
+                '!'
+            } else {
+                '1'
+            }
+        }
+        0x03 => {
+            if state.shift() {
+                '@'
+            } else {
+                '2'
+            }
+        }
+        0x04 => {
+            if state.shift() {
+                '#'
+            } else {
+                '3'
+            }
+        }
+        0x05 => {
+            if state.shift() {
+                '$'
+            } else {
+                '4'
+            }
+        }
+        0x06 => {
+            if state.shift() {
+                '%'
+            } else {
+                '5'
+            }
+        }
+        0x07 => {
+            if state.shift() {
+                '^'
+            } else {
+                '6'
+            }
+        }
+        0x08 => {
+            if state.shift() {
+                '&'
+            } else {
+                '7'
+            }
+        }
+        0x09 => {
+            if state.shift() {
+                '*'
+            } else {
+                '8'
+            }
+        }
+        0x0A => {
+            if state.shift() {
+                '('
+            } else {
+                '9'
+            }
+        }
+        0x0B => {
+            if state.shift() {
+                ')'
+            } else {
+                '0'
+            }
+        }
+        0x0C => {
+            if state.shift() {
+                '_'
+            } else {
+                '-'
+            }
+        }
+        0x0D => {
+            if state.shift() {
+                '+'
+            } else {
+                '='
+            }
+        }
+
+        // Alpha keys
+        sc @ 0x10..=0x32 => {
+            let upper = state.shift() ^ state.caps_lock();
+            alpha_scancode(sc, upper)
+        }
+
+        // Unknown make codes — log to serial
+        sc if sc < 0x80 => {
+            crate::serial_fmt!("[KBD] unmapped scancode: {:#04x}\n", sc);
+            '\0'
+        }
+
+        // Break codes (key release) — silently ignore
+        _ => '\0',
+    }
+}
+
+/// Map an alpha scancode to its character, applying case.
+fn alpha_scancode(sc: u8, upper: bool) -> char {
+    let ch = match sc {
+        0x1E => 'a',
+        0x30 => 'b',
+        0x2E => 'c',
+        0x20 => 'd',
+        0x12 => 'e',
+        0x21 => 'f',
+        0x22 => 'g',
+        0x23 => 'h',
+        0x17 => 'i',
+        0x24 => 'j',
+        0x25 => 'k',
+        0x26 => 'l',
+        0x32 => 'm',
+        0x31 => 'n',
+        0x18 => 'o',
+        0x19 => 'p',
+        0x10 => 'q',
+        0x13 => 'r',
+        0x1F => 's',
+        0x14 => 't',
+        0x16 => 'u',
+        0x2F => 'v',
+        0x11 => 'w',
+        0x2D => 'x',
+        0x15 => 'y',
+        0x2C => 'z',
+        _ => return '\0',
+    };
+    if upper {
+        (ch as u8 - b'a' + b'A') as char
+    } else {
+        ch
+    }
+}
+

@@ -2,9 +2,9 @@ use crate::boot::{CoreOS_BootInfo, FONT};
 use core::fmt::Write;
 use core::ptr::addr_of;
 
-pub const BG_COLOR: u32 = 0x00282828; // Dark hard-charcoal
-pub const TEXT_COLOR: u32 = 0x00EBDBB2; // Retro cream/bone
-pub const CLOCK_COLOR: u32 = 0x00FABD2F; // Industrial yellow-gold
+pub const BG_COLOR: u32 = 0x00282828;
+pub const TEXT_COLOR: u32 = 0x00EBDBB2;
+pub const CLOCK_COLOR: u32 = 0x00FABD2F;
 
 pub struct Console {
     pub x: usize,
@@ -43,7 +43,7 @@ pub unsafe fn draw_rect(
     let pitch = core::ptr::read_unaligned(addr_of!((*boot_info).pitch)) as usize;
     for dy in 0..h {
         for dx in 0..w {
-            base.add((y + dy) * pitch + (x + dx)).write_volatile(color); // ← this line was missing
+            base.add((y + dy) * pitch + (x + dx)).write_volatile(color);
         }
     }
 }
@@ -57,13 +57,11 @@ pub unsafe fn putchar(
     boot_info: *const CoreOS_BootInfo,
 ) {
     let font_ptr = FONT.as_ptr();
-
     let header_size = core::ptr::read_unaligned(font_ptr.add(8) as *const u32) as usize;
     let bytes_per_glyph = core::ptr::read_unaligned(font_ptr.add(20) as *const u32) as usize;
     let font_height = core::ptr::read_unaligned(font_ptr.add(24) as *const u32) as usize;
 
     let glyph = font_ptr.add(header_size + (c as usize) * bytes_per_glyph);
-
     let base = core::ptr::read_unaligned(addr_of!((*boot_info).fb_base)) as *mut u32;
     let pitch = core::ptr::read_unaligned(addr_of!((*boot_info).pitch)) as usize;
 
@@ -73,8 +71,8 @@ pub unsafe fn putchar(
             if (bitmask & (0x80 >> bit)) != 0 {
                 for sy in 0..scale {
                     for sx in 0..scale {
-                        let px = x + (bit * scale) + sx;
-                        let py = y + (row * scale) + sy;
+                        let px = x + bit * scale + sx;
+                        let py = y + row * scale + sy;
                         base.add(py * pitch + px).write_volatile(color);
                     }
                 }
@@ -86,12 +84,11 @@ pub unsafe fn putchar(
 pub unsafe fn clear_from(start_y: usize, boot_info: *const CoreOS_BootInfo) {
     let width = core::ptr::read_unaligned(addr_of!((*boot_info).width)) as usize;
     let height = core::ptr::read_unaligned(addr_of!((*boot_info).height)) as usize;
-
     draw_rect(0, start_y, width, height - start_y, BG_COLOR, boot_info);
 }
 
 pub unsafe fn clear_line(y: usize, scale: usize, boot_info: *const CoreOS_BootInfo) {
     let width = core::ptr::read_unaligned(addr_of!((*boot_info).width)) as usize;
-
     draw_rect(0, y, width, 16 * scale, BG_COLOR, boot_info);
 }
+

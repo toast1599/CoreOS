@@ -14,7 +14,7 @@ impl Write for SerialWriter {
 }
 
 pub unsafe fn write_byte(b: u8) {
-    core::arch::asm!("out dx, al", in("dx") 0x3F8u16, in("al") b);
+    core::arch::asm!("out dx, al", in("dx") 0x3F8u16, in("al") b, options(nostack, nomem));
 }
 
 pub unsafe fn write_str(s: &str) {
