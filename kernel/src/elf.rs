@@ -74,8 +74,8 @@ const OFF_TYPE: usize = 16;
 const OFF_MACHINE: usize = 18;
 const OFF_ENTRY: usize = 24;
 const OFF_PHOFF: usize = 32;
-const OFF_PHENTSIZE: usize = 48;
-const OFF_PHNUM: usize = 50;
+const OFF_PHENTSIZE: usize = 54;
+const OFF_PHNUM: usize = 56;
 
 // ---------------------------------------------------------------------------
 // ELF64 program header offsets (within each phdr entry)
@@ -120,6 +120,13 @@ pub unsafe fn load(data: &[u8]) -> Result<u64, ElfError> {
     if data.len() < 64 {
         return Err(ElfError::TooSmall);
     }
+    crate::serial_fmt!(
+        "elf::load magic: {:x} {:x} {:x} {:x}\n",
+        data[0],
+        data[1],
+        data[2],
+        data[3]
+    );
     if data[0..4] != ELFMAG {
         return Err(ElfError::BadMagic);
     }
@@ -228,4 +235,3 @@ pub unsafe fn load(data: &[u8]) -> Result<u64, ElfError> {
 
     Ok(entry)
 }
-

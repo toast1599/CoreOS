@@ -26,6 +26,11 @@ typedef struct {
     CoreOS_MemMapEntry mmap[MAX_MMAP_ENTRIES];
     uint32_t           mmap_count;
     uint32_t           _pad;
+
+    // Initial userspace ELF loaded from ESP.
+    // user_elf_base == 0 means no binary was found.
+    uint64_t           user_elf_base;
+    uint64_t           user_elf_size;
 } CoreOS_BootInfo;
 #pragma pack(pop)
 
@@ -117,6 +122,36 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
         stored++;
     }
     bInfo.mmap_count = stored;
+
+	// -----------------------------------------------------------------------
+	    // 3b. Load user ELF (test.elf) from ESP if present
+	    // -----------------------------------------------------------------------
+	    bInfo.user_elf_base = 0;
+	    bInfo.user_elf_size = 0;
+	
+	    EFI_FILE_PROTOCOL *elf_file;
+	    status = root->Open(root, &elf_file, L"test.elf", EFI_FILE_MODE_READ, 0);
+	    if (!EFI_ERROR(status)) {
+	        UINTN elfInfoSize = 0;
+	        elf_file->GetInfo(elf_file, &fileInfoGuid, &elfInfoSize, NULL);
+	
+	        EFI_FILE_INFO *elfInfo;
+	        SystemTable->BootServices->AllocatePool(EfiLoaderData, elfInfoSize, (void**)&elfInfo);
+	        elf_file->GetInfo(elf_file, &fileInfoGuid, &elfInfoSize, elfInfo);
+	
+	        UINTN elfSize = elfInfo->FileSize;
+	        UINTN elfPages = (elfSize + 0xFFF) / 0x1000;
+	
+	        EFI_PHYSICAL_ADDRESS elf_addr = 0x200000; // load at 2 MB
+	        SystemTable->BootServices->AllocatePages(
+	            AllocateAddress, EfiLoaderData, elfPages, &elf_addr);
+	
+	        elf_file->Read(elf_file, &elfSize, (void*)elf_addr);
+	
+	        bInfo.user_elf_base = (uint64_t)elf_addr;
+	        bInfo.user_elf_size = (uint64_t)elfSize;
+	    }
+	    // If test.elf is missing, user_elf_base stays 0 and the kernel skips it.
 
     // -----------------------------------------------------------------------
     // 4. Exit Boot Services

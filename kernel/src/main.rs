@@ -127,6 +127,35 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
     serial::write_str("pmm ok\n");
 
     // -----------------------------------------------------------------------
+    // 2b. Save user ELF bytes to a static buffer before anything can
+    //     overwrite 0x200000 (paging, heap, etc.)
+    // -----------------------------------------------------------------------
+    static mut ELF_BUF: [u8; 64 * 1024] = [0u8; 64 * 1024]; // 64 KB max
+    static mut ELF_LEN: usize = 0;
+
+    {
+        let elf_base = core::ptr::read_unaligned(core::ptr::addr_of!((*boot_info).user_elf_base));
+        let elf_size =
+            core::ptr::read_unaligned(core::ptr::addr_of!((*boot_info).user_elf_size)) as usize;
+
+        serial_fmt!("elf_base={:#x} elf_size={}\n", elf_base, elf_size);
+
+        if elf_base != 0 && elf_size > 0 && elf_size <= ELF_BUF.len() {
+            let src = core::slice::from_raw_parts(elf_base as *const u8, elf_size);
+            serial_fmt!(
+                "ELF magic: {:x} {:x} {:x} {:x}\n",
+                src[0],
+                src[1],
+                src[2],
+                src[3]
+            );
+            ELF_BUF[..elf_size].copy_from_slice(src);
+            ELF_LEN = elf_size;
+            serial::write_str("elf bytes saved to static buffer\n");
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // 3. Paging (identity map first 4 GB + framebuffer)
     // -----------------------------------------------------------------------
     paging::init(boot_info);
@@ -136,6 +165,34 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
     // 4. Kernel subsystems
     // -----------------------------------------------------------------------
     FILESYSTEM = Some(fs::RamFS::new());
+
+    // Load saved ELF bytes into RamFS now that heap is available
+    if ELF_LEN > 0 {
+        serial_fmt!(
+            "ELF_BUF addr={:#x} magic at copy time: {:x} {:x} {:x} {:x}\n",
+            ELF_BUF.as_ptr() as usize,
+            ELF_BUF[0],
+            ELF_BUF[1],
+            ELF_BUF[2],
+            ELF_BUF[3]
+        );
+        let name: &[char] = &['t', 'e', 's', 't'];
+        if let Some(ref mut fs) = FILESYSTEM {
+            if fs.create(name) {
+                if let Some(f) = fs.find_mut(name) {
+                    f.data.extend_from_slice(&ELF_BUF[..ELF_LEN]);
+                    serial_fmt!(
+                        "user ELF loaded: {} bytes, magic: {:x} {:x} {:x} {:x}\n",
+                        f.data.len(),
+                        f.data[0],
+                        f.data[1],
+                        f.data[2],
+                        f.data[3]
+                    );
+                }
+            }
+        }
+    }
 
     gdt::init();
     serial::write_str("gdt ok\n");
@@ -387,7 +444,7 @@ pub extern "C" fn default_exception() {
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     unsafe {
-        serial::write_str("[KERNEL PANIC] ");
+        serial::write_str("[PERNEL KANIC] ");
     }
     if let Some(msg) = info.message().as_str() {
         unsafe {
