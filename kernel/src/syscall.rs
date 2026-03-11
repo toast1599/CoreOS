@@ -71,23 +71,37 @@ syscall_entry:
     // On entry (CPU has done this automatically):
     //   RCX = user RIP (return address)
     //   R11 = user RFLAGS
-    //   RSP = still the USER stack  ← we must swap this immediately
+    //   RSP = still the USER stack  <- we must swap this immediately
     //   CS/SS already set to kernel selectors
 
-    // Swap to kernel stack via TSS.rsp0
-    // We use swapgs-free approach: just load TSS.rsp0 directly.
-    // Save user RSP in r10 (caller-saved, safe to clobber)
+    // Save user RSP, then switch to kernel stack via TSS_RSP0
     mov r10, rsp
-    // Load kernel stack from TSS.rsp0
-    // TSS is a static symbol exported from gdt.rs
-	lea rsp, [rip + TSS_RSP0]
-	mov rsp, [rsp]
+    lea rsp, [rip + TSS_RSP0]
+    mov rsp, [rsp]
 
-    // Now on kernel stack — save everything
+    // Stack frame (pushed in this order, so offsets below are from the
+    // stack pointer AFTER all pushes):
+    //
+    //   [rsp+ 0] rbp
+    //   [rsp+ 8] r15
+    //   [rsp+16] r14
+    //   [rsp+24] r13
+    //   [rsp+32] r12
+    //   [rsp+40] r9
+    //   [rsp+48] r8
+    //   [rsp+56] rsi   ← original arg2 (syscall arg2)
+    //   [rsp+64] rdi   ← original arg1 (syscall arg1)
+    //   [rsp+72] rdx   ← original arg3 (syscall arg3)
+    //   [rsp+80] rbx
+    //   [rsp+88] rax   ← syscall number (we overwrite this with retval before pop)
+    //   [rsp+96] rcx   ← user RIP
+    //   [rsp+104] r11  ← user RFLAGS
+    //   [rsp+112] r10  ← user RSP
+
     push r10        // user rsp
     push r11        // user rflags
     push rcx        // user rip (sysretq return address)
-    push rax        // syscall number
+    push rax        // syscall number  ← will be overwritten with retval below
     push rbx
     push rdx
     push rdi
@@ -100,17 +114,28 @@ syscall_entry:
     push r15
     push rbp
 
-    // Call Rust dispatcher
-    // Args (System V): rdi=rax(num), rsi=rdi(arg1), rdx=rsi(arg2), rcx=rdx(arg3)
-    // But we already pushed rdi/rsi/rdx — read them from where they were before push
-    // Simpler: pass the stack pointer, let Rust unpack it
-    mov rdi, rax    // syscall number
-    mov rsi, [rsp + 8*6]   // original rdi (arg1) — index from bottom of our pushes
-    mov rdx, [rsp + 8*7]   // original rsi (arg2)
-    mov rcx, [rsp + 8*5]   // original rdx (arg3)
-    call syscall_dispatch
+    // Set up args for syscall_dispatch(num, arg1, arg2, arg3)
+    // System V: rdi=arg0, rsi=arg1, rdx=arg2, rcx=arg3
+    // We saved the originals on the stack; read them back from their slots.
+    mov rdi, [rsp + 8*11]   // rax slot = syscall number
+    mov rsi, [rsp + 8*7]    // rdi slot = arg1
+    mov rdx, [rsp + 8*6]    // rsi slot = arg2  (note: rdx was pushed at rsp+72 = 8*9 from bottom, recount below)
+    mov rcx, [rsp + 8*9]    // rdx slot = arg3
 
-    // Restore
+    // Stack from bottom (rsp=0 is rbp):
+    // 0:rbp 1:r15 2:r14 3:r13 4:r12 5:r9 6:r8 7:rsi 8:rdi 9:rdx 10:rbx 11:rax 12:rcx 13:r11 14:r10
+    mov rdi, [rsp + 8*11]   // syscall number (rax slot)
+    mov rsi, [rsp + 8*8]    // arg1 (rdi slot)
+    mov rdx, [rsp + 8*7]    // arg2 (rsi slot)
+    mov rcx, [rsp + 8*9]    // arg3 (rdx slot)
+
+    call syscall_dispatch    // return value lands in rax
+
+    // Write retval directly into the rax slot on the stack so the pop
+    // below picks it up correctly — no separate stash register needed.
+    mov [rsp + 8*11], rax
+
+    // Restore all saved registers
     pop rbp
     pop r15
     pop r14
@@ -118,13 +143,11 @@ syscall_entry:
     pop r12
     pop r9
     pop r8
-    pop rsi         // original rsi
-    pop rdi         // original rdi
-    pop rdx         // original rdx
+    pop rsi
+    pop rdi
+    pop rdx
     pop rbx
-    pop rax         // syscall number — rax now holds return value from dispatch? no:
-                    // syscall_dispatch returns in rax automatically (C ABI)
-                    // so we need to save retval before pops. see note below.
+    pop rax         // ← retval from syscall_dispatch (written above)
     pop rcx         // user rip
     pop r11         // user rflags
     pop r10         // user rsp
@@ -134,13 +157,19 @@ syscall_entry:
 "#
 );
 
-/// Rust syscall dispatcher — Phase 2 will fill this out properly.
-/// rax = syscall number, rdi = arg1, rsi = arg2, rdx = arg3
+/// Rust syscall dispatcher.
+/// num = syscall number, arg1/arg2/arg3 = first three arguments.
+/// Return value is passed back to userspace in rax.
 #[no_mangle]
 pub extern "C" fn syscall_dispatch(num: u64, arg1: u64, arg2: u64, arg3: u64) -> u64 {
     match num {
+        0 => {
+            // read(fd, buf, count) — stub: no userspace stdin yet
+            let _ = (arg1, arg2, arg3);
+            u64::MAX
+        }
         1 => {
-            // write — stub: just dump to serial for now
+            // write(fd, buf, count) — dump to serial for now
             let buf = arg2 as *const u8;
             let len = arg3 as usize;
             unsafe {
@@ -150,8 +179,15 @@ pub extern "C" fn syscall_dispatch(num: u64, arg1: u64, arg2: u64, arg3: u64) ->
             }
             len as u64
         }
+        12 => {
+            // brk(addr)
+            // If addr == 0: return current break.
+            // If addr > current break: grow by allocating pages.
+            // Returns new break on success, old break on OOM.
+            unsafe { syscall_brk(arg1) }
+        }
         60 => {
-            // exit
+            // exit(code)
             crate::dbg_log!("SYSCALL", "exit({})", arg1);
             loop {
                 unsafe {
@@ -161,9 +197,54 @@ pub extern "C" fn syscall_dispatch(num: u64, arg1: u64, arg2: u64, arg3: u64) ->
         }
         _ => {
             crate::dbg_log!("SYSCALL", "unhandled syscall {}", num);
-            u64::MAX // -1, errno style
+            u64::MAX // errno-style -1
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// brk implementation
+// ---------------------------------------------------------------------------
+
+/// Start the program break well above the kernel's identity-mapped region.
+/// 0x0000_7fff_0000_0000 is in the user half of the address space.
+static mut PROGRAM_BREAK: usize = 0x0000_7fff_0000_0000;
+
+unsafe fn syscall_brk(addr: u64) -> u64 {
+    if addr == 0 {
+        return PROGRAM_BREAK as u64;
+    }
+
+    let new_brk = addr as usize;
+    if new_brk <= PROGRAM_BREAK {
+        // Shrinking or no-op — just update the break.
+        PROGRAM_BREAK = new_brk;
+        return PROGRAM_BREAK as u64;
+    }
+
+    // Growing — allocate physical pages to cover [old_break..new_brk).
+    // Round current break up to next page boundary to find first unmapped page.
+    let mut page = (PROGRAM_BREAK + 0xFFF) & !0xFFF;
+    let end = (new_brk + 0xFFF) & !0xFFF;
+
+    while page < end {
+        let frame = crate::pmm::alloc_frame();
+        if frame == 0 {
+            // OOM — return the old break to signal failure to libc.
+            crate::dbg_log!("BRK", "OOM growing break to {:#x}", new_brk);
+            return PROGRAM_BREAK as u64;
+        }
+        // The kernel uses an identity map for the first 4 GB, so
+        // physical == virtual. For addresses above 4 GB (like our break
+        // base) you will need to wire up a page-table mapping here once
+        // you have proper userspace paging. For now this is fine for
+        // testing musl-linked binaries running in ring 0 / kernel space.
+        page += 0x1000;
+    }
+
+    PROGRAM_BREAK = new_brk;
+    crate::dbg_log!("BRK", "break → {:#x}", PROGRAM_BREAK);
+    PROGRAM_BREAK as u64
 }
 
 extern "C" {

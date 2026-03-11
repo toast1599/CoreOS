@@ -133,9 +133,8 @@ pub unsafe fn init_main_task(stack_base: usize) {
         stack_base,
         state: TaskState::Running,
         id: 0,
-        rsp_valid: false,
+        rsp_valid: true,
     });
     CURRENT = 0;
     crate::dbg_log!("TASK", "main task registered as task 0");
 }
-

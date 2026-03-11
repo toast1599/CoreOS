@@ -121,13 +121,17 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
     // -----------------------------------------------------------------------
     // 4. Exit Boot Services
     // -----------------------------------------------------------------------
-    status = SystemTable->BootServices->ExitBootServices(ImageHandle, mapKey);
-    if (EFI_ERROR(status)) {
-        // Re-fetch map key and retry (required by spec)
-        mapSize = 0;
-        SystemTable->BootServices->GetMemoryMap(&mapSize, NULL, &mapKey, &descSize, &descVer);
-        SystemTable->BootServices->ExitBootServices(ImageHandle, mapKey);
-    }
+status = SystemTable->BootServices->ExitBootServices(ImageHandle, mapKey);
+if (EFI_ERROR(status)) {
+    // AllocatePool changes the map, so we must re-fetch size, re-allocate,
+    // then re-fetch the full map (with a fresh mapKey) before retrying.
+    mapSize = 0;
+    SystemTable->BootServices->GetMemoryMap(&mapSize, NULL, &mapKey, &descSize, &descVer);
+    mapSize += 2 * descSize;
+    SystemTable->BootServices->AllocatePool(EfiLoaderData, mapSize, (void**)&memMap);
+    SystemTable->BootServices->GetMemoryMap(&mapSize, memMap, &mapKey, &descSize, &descVer);
+    SystemTable->BootServices->ExitBootServices(ImageHandle, mapKey);
+}	
 
     // -----------------------------------------------------------------------
     // 5. Debug: White square drawn in C (sanity check before kernel runs)

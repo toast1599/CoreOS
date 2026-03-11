@@ -307,7 +307,6 @@ unsafe fn run_shell(boot_info: *const boot::CoreOS_BootInfo) -> ! {
                     if shell.cursor < max_chars && shell.cursor < 63 {
                         shell.push(c);
                         redraw_prompt(boot_info, current_y, global_scale, &shell);
-                        crate::serial_fmt!("tick={}\n", hw::pit::ticks());
                     }
                 }
             }
