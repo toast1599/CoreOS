@@ -71,6 +71,8 @@ pub fn dispatch(shell: &Shell, ctx: &mut ShellContext) -> ShellOutput {
         cmd_sleep(buf)
     } else if cmd_is(buf, "font") {
         cmd_font(buf, ctx)
+    } else if cmd_is(buf, "exec") {
+        cmd_exec(buf, ctx)
     } else if cmd_is(buf, "reboot") {
         unsafe {
             crate::hw::reboot();
@@ -220,3 +222,20 @@ fn cmd_font(buf: &[char; BUF_LEN], ctx: &mut ShellContext) -> ShellOutput {
     }
     ShellOutput::None
 }
+
+fn cmd_exec(buf: &[char; BUF_LEN], ctx: &ShellContext) -> ShellOutput {
+    let filename = get_arg(buf, 4); // "exec <filename>"
+    let Some(fs) = ctx.filesystem.as_ref() else {
+        return ShellOutput::Print("Error: no filesystem.".into());
+    };
+    let Some(file) = fs.find(filename) else {
+        return ShellOutput::Print("Error: file not found.".into());
+    };
+
+    let data = file.data.as_slice();
+    match unsafe { crate::elf::load(data) } {
+        Ok(entry) => ShellOutput::Print(alloc::format!("ELF loaded. Entry point: {:#x}", entry)),
+        Err(e) => ShellOutput::Print(alloc::format!("ELF error: {:?}", e)),
+    }
+}
+

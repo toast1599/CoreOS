@@ -208,7 +208,7 @@ pub extern "C" fn syscall_dispatch(num: u64, arg1: u64, arg2: u64, arg3: u64) ->
 
 /// Start the program break well above the kernel's identity-mapped region.
 /// 0x0000_7fff_0000_0000 is in the user half of the address space.
-static mut PROGRAM_BREAK: usize = 0x0000_7fff_0000_0000;
+static mut PROGRAM_BREAK: usize = 0x4000_0000;
 
 unsafe fn syscall_brk(addr: u64) -> u64 {
     if addr == 0 {
@@ -250,4 +250,3 @@ unsafe fn syscall_brk(addr: u64) -> u64 {
 extern "C" {
     static mut TSS_RSP0: u64;
 }
-

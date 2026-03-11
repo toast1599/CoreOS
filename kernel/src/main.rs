@@ -10,6 +10,7 @@ extern crate alloc;
 
 mod boot;
 mod debug;
+mod elf;
 mod fs;
 mod gdt;
 mod heap;
