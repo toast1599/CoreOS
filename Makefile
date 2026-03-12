@@ -92,7 +92,7 @@ run: $(IMAGE)
 		-serial stdio \
 		-vga std \
 		-m 512M \
-		-d int,cpu_reset \
+		-d cpu_reset \
 		-no-reboot -no-shutdown \
 # =========================
 # Project Context Dump
