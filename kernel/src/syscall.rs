@@ -162,6 +162,7 @@ syscall_entry:
 /// Return value is passed back to userspace in rax.
 #[no_mangle]
 pub extern "C" fn syscall_dispatch(num: u64, arg1: u64, arg2: u64, arg3: u64) -> u64 {
+    crate::serial_fmt!("[SYSCALL] num={}\n", num);
     match num {
         0 => {
             // read(fd, buf, count) — stub: no userspace stdin yet

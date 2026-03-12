@@ -11,6 +11,7 @@ extern crate alloc;
 mod boot;
 mod debug;
 mod elf;
+mod exec;
 mod fs;
 mod gdt;
 mod heap;
@@ -444,7 +445,7 @@ pub extern "C" fn default_exception() {
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     unsafe {
-        serial::write_str("[PERNEL KANIC] ");
+        serial::write_str("![PERNEL KANIC]!");
     }
     if let Some(msg) = info.message().as_str() {
         unsafe {

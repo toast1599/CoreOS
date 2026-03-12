@@ -228,25 +228,11 @@ fn cmd_exec(buf: &[char; BUF_LEN], ctx: &ShellContext) -> ShellOutput {
     let Some(fs) = ctx.filesystem.as_ref() else {
         return ShellOutput::Print("Error: no filesystem.".into());
     };
-
-    // Clone the bytes out immediately so no further allocation can
-    // corrupt the Vec's backing buffer before elf::load reads it.
     let elf_bytes: alloc::vec::Vec<u8> = match fs.find(filename) {
         Some(file) => file.data.clone(),
         None => return ShellOutput::Print("Error: file not found.".into()),
     };
 
-    crate::serial_fmt!(
-        "exec magic: {:x} {:x} {:x} {:x}\n",
-        elf_bytes[0],
-        elf_bytes[1],
-        elf_bytes[2],
-        elf_bytes[3]
-    );
-
-    match unsafe { crate::elf::load(elf_bytes.as_slice()) } {
-        Ok(entry) => ShellOutput::Print(alloc::format!("ELF loaded. Entry point: {:#x}", entry)),
-        Err(e) => ShellOutput::Print(alloc::format!("ELF error: {:?}", e)),
-    }
+    // Point of no return — drops to ring 3
+    unsafe { crate::exec::exec(elf_bytes.as_slice()) }
 }
-

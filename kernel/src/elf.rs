@@ -230,7 +230,13 @@ pub unsafe fn load(data: &[u8]) -> Result<u64, ElfError> {
         }
 
         // BSS gap (memsz > filesz) is already zeroed by the write_bytes above.
-        crate::dbg_log!("ELF", "segment loaded at vaddr={:#x}", p_vaddr);
+        let first4 = core::slice::from_raw_parts(p_vaddr as *const u8, 4.min(p_filesz));
+        crate::dbg_log!(
+            "ELF",
+            "segment loaded at vaddr={:#x} first_bytes={:x?}",
+            p_vaddr,
+            first4
+        );
     }
 
     Ok(entry)
