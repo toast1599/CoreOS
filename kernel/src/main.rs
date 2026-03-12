@@ -473,7 +473,7 @@ pub extern "C" fn default_exception() {
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     unsafe {
-        serial::write_str("![PERNEL KANIC]!");
+        serial::write_str("[PERNEL KANIC] ");
     }
     if let Some(msg) = info.message().as_str() {
         unsafe {
@@ -487,8 +487,17 @@ fn panic(info: &PanicInfo) -> ! {
             serial::write_str("\n");
         }
     }
-    loop {
-        unsafe {
+    unsafe {
+        // Disable interrupts and shut down via QEMU magic port.
+        // On real hardware this falls through to the hlt loop safely.
+        core::arch::asm!("cli");
+        core::arch::asm!(
+            "out dx, ax",
+            in("dx") 0x604u16,
+            in("ax") 0x2000u16,
+            options(nostack, nomem)
+        );
+        loop {
             core::arch::asm!("hlt");
         }
     }
