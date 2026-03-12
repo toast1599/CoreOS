@@ -233,6 +233,11 @@ fn cmd_exec(buf: &[char; BUF_LEN], ctx: &ShellContext) -> ShellOutput {
         None => return ShellOutput::Print("Error: file not found.".into()),
     };
 
-    // Point of no return — drops to ring 3
-    unsafe { crate::exec::exec(elf_bytes.as_slice()) }
+    let pid = unsafe { crate::exec::exec_as_task(elf_bytes.as_slice()) };
+    if pid == 0 {
+        ShellOutput::Print("exec failed.".into())
+    } else {
+        ShellOutput::Print(alloc::format!("spawned pid={}", pid))
+    }
 }
+

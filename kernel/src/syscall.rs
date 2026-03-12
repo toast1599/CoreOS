@@ -190,6 +190,15 @@ pub extern "C" fn syscall_dispatch(num: u64, arg1: u64, arg2: u64, arg3: u64) ->
         60 => {
             // exit(code)
             crate::dbg_log!("SYSCALL", "exit({})", arg1);
+            unsafe {
+                crate::process::exit(arg1 as i64);
+                if let Some(slot) = crate::process::current_task_slot() {
+                    crate::task::kill_task(slot);
+                }
+                // Re-enable interrupts so the PIT fires and the scheduler
+                // can switch away from this dead task.
+                core::arch::asm!("sti");
+            }
             loop {
                 unsafe {
                     core::arch::asm!("hlt");

@@ -19,6 +19,7 @@ mod hw;
 mod idt;
 mod paging;
 mod pmm;
+mod process;
 mod scheduler;
 mod serial;
 mod shell;
@@ -286,6 +287,33 @@ unsafe fn run_shell(boot_info: *const boot::CoreOS_BootInfo) -> ! {
         draw_clock(boot_info, clock_x, 20, h, m, s);
 
         // ── Key input ──────────────────────────────────────────────────────
+        // Block shell input while user process is alive.
+        if process::is_running() {
+            continue;
+        }
+
+        // Process just became zombie — reap it and show prompt.
+        if let Some(code) = process::reap() {
+            current_y += 16 * global_scale;
+            let mut con = Console {
+                x: 20,
+                y: current_y,
+                color: vga::TEXT_COLOR,
+                scale: global_scale,
+                boot_info,
+            };
+            let _ = write!(con, "process exited (code {})", code);
+            current_y += 16 * global_scale;
+            let mut prompt = Console {
+                x: 20,
+                y: current_y,
+                color: vga::TEXT_COLOR,
+                scale: global_scale,
+                boot_info,
+            };
+            let _ = write!(prompt, "> ");
+        }
+
         core::arch::asm!("cli", options(nostack, nomem));
         let key = hw::kbd_buffer::KEYBUF.pop();
         core::arch::asm!("sti", options(nostack, nomem));
