@@ -25,10 +25,12 @@ pub struct CoreOS_BootInfo {
     pub mmap_count: u32,
     pub _pad: u32,
 
-    // Initial userspace ELF loaded by the bootloader.
-    // user_elf_base == 0 means no binary was found.
     pub user_elf_base: u64,
     pub user_elf_size: u64,
+
+    pub font_base: u64,
+    pub font_size: u64,
+
+    /// TSC value recorded at the very start of efi_main in the bootloader.
+    pub tsc_bootloader_start: u64,
 }
-// Keep the font here as it is a boot-time resource.
-pub const FONT: &[u8] = include_bytes!("font.psfu");

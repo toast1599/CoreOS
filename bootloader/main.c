@@ -31,6 +31,10 @@ typedef struct {
     // user_elf_base == 0 means no binary was found.
     uint64_t           user_elf_base;
     uint64_t           user_elf_size;
+
+uint64_t           font_base;
+    uint64_t           font_size;
+    uint64_t           tsc_bootloader_start;
 } CoreOS_BootInfo;
 #pragma pack(pop)
 
@@ -45,7 +49,10 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
     EFI_GUID liGuid   = EFI_LOADED_IMAGE_PROTOCOL_GUID;
     EFI_GUID sfspGuid = EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID;
 
-    SystemTable->BootServices->SetWatchdogTimer(0, 0, 0, NULL);
+// Record TSC at bootloader entry for boot timing.
+    uint64_t tsc_lo, tsc_hi;
+    __asm__ volatile("rdtsc" : "=a"(tsc_lo), "=d"(tsc_hi));
+    bInfo.tsc_bootloader_start = (tsc_hi << 32) | tsc_lo;
     SystemTable->BootServices->LocateProtocol(&gopGuid, NULL, (void**)&gop);
 
     // -----------------------------------------------------------------------
@@ -152,6 +159,35 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
 	        bInfo.user_elf_size = (uint64_t)elfSize;
 	    }
 	    // If test.elf is missing, user_elf_base stays 0 and the kernel skips it.
+
+// -----------------------------------------------------------------------
+    // 3c. Load font.psfu from ESP
+    // -----------------------------------------------------------------------
+    bInfo.font_base = 0;
+    bInfo.font_size = 0;
+
+    EFI_FILE_PROTOCOL *font_file;
+    status = root->Open(root, &font_file, L"font.psfu", EFI_FILE_MODE_READ, 0);
+    if (!EFI_ERROR(status)) {
+        UINTN fontInfoSize = 0;
+        font_file->GetInfo(font_file, &fileInfoGuid, &fontInfoSize, NULL);
+
+        EFI_FILE_INFO *fontInfo;
+        SystemTable->BootServices->AllocatePool(EfiLoaderData, fontInfoSize, (void**)&fontInfo);
+        font_file->GetInfo(font_file, &fileInfoGuid, &fontInfoSize, fontInfo);
+
+        UINTN fontFileSize = fontInfo->FileSize;
+        UINTN fontPages = (fontFileSize + 0xFFF) / 0x1000;
+
+        EFI_PHYSICAL_ADDRESS font_addr = 0x2000000; // 32 MB — safely above kernel and ELF
+        SystemTable->BootServices->AllocatePages(
+            AllocateAddress, EfiLoaderData, fontPages, &font_addr);
+
+        font_file->Read(font_file, &fontFileSize, (void*)font_addr);
+
+        bInfo.font_base = (uint64_t)font_addr;
+        bInfo.font_size = (uint64_t)fontFileSize;
+    }
 
     // -----------------------------------------------------------------------
     // 4. Exit Boot Services

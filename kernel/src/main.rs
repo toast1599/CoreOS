@@ -8,6 +8,7 @@
 
 extern crate alloc;
 
+mod bench;
 mod boot;
 mod debug;
 mod elf;
@@ -107,6 +108,9 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
     core::ptr::write_bytes(bss_start, 0, bss_end as usize - bss_start as usize);
 
     serial::write_str("kernel start\n");
+    bench::stamp(bench::Phase::KernelEntry);
+    let bl_tsc = core::ptr::read_unaligned(core::ptr::addr_of!((*boot_info).tsc_bootloader_start));
+    bench::set_bootloader_tsc(bl_tsc);
 
     // -----------------------------------------------------------------------
     // 1. Switch to our own stack
@@ -127,6 +131,7 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
     let kernel_end = &raw const __stack_top as usize + 0x200000; // stack top + 2 MB margin
     pmm::init(boot_info, kernel_end);
     serial::write_str("pmm ok\n");
+    bench::stamp(bench::Phase::PmmDone);
 
     // -----------------------------------------------------------------------
     // 2b. Save user ELF bytes to a static buffer before anything can
@@ -134,7 +139,20 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
     // -----------------------------------------------------------------------
     static mut ELF_BUF: [u8; 64 * 1024] = [0u8; 64 * 1024]; // 64 KB max
     static mut ELF_LEN: usize = 0;
+    static mut FONT_BUF: [u8; 16 * 1024] = [0u8; 16 * 1024]; // 16 KB max
+    static mut FONT_LEN: usize = 0;
+    {
+        let font_base = core::ptr::read_unaligned(core::ptr::addr_of!((*boot_info).font_base));
+        let font_size =
+            core::ptr::read_unaligned(core::ptr::addr_of!((*boot_info).font_size)) as usize;
 
+        if font_base != 0 && font_size > 0 && font_size <= FONT_BUF.len() {
+            let src = core::slice::from_raw_parts(font_base as *const u8, font_size);
+            FONT_BUF[..font_size].copy_from_slice(src);
+            FONT_LEN = font_size;
+            serial::write_str("font loaded into static buffer\n");
+        }
+    }
     {
         let elf_base = core::ptr::read_unaligned(core::ptr::addr_of!((*boot_info).user_elf_base));
         let elf_size =
@@ -162,6 +180,13 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
     // -----------------------------------------------------------------------
     paging::init(boot_info);
     serial::write_str("paging ok\n");
+    bench::stamp(bench::Phase::PagingDone);
+
+    // Point BootInfo font fields at our static buffer now that paging is up
+    if FONT_LEN > 0 {
+        (*boot_info.cast_mut()).font_base = FONT_BUF.as_ptr() as u64;
+        (*boot_info.cast_mut()).font_size = FONT_LEN as u64;
+    }
 
     // -----------------------------------------------------------------------
     // 4. Kernel subsystems
@@ -198,6 +223,7 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
 
     gdt::init();
     serial::write_str("gdt ok\n");
+    bench::stamp(bench::Phase::GdtDone);
 
     extern "C" {
         static __stack_bottom: u8;
@@ -207,12 +233,15 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
 
     idt::init();
     serial::write_str("idt ok\n");
+    bench::stamp(bench::Phase::IdtDone);
 
     syscall::init();
     serial::write_str("syscall gate ok\n");
+    bench::stamp(bench::Phase::SyscallDone);
 
     hw::pit::init();
     serial::write_str("pit ok\n");
+    bench::stamp(bench::Phase::PitDone);
 
     task::init_main_task(&raw const __stack_bottom as usize);
 
@@ -230,12 +259,14 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
         serial_fmt!("heap smoke-test: {:?} {:?}\n", v[0], v[1]);
     }
 
+    bench::stamp(bench::Phase::HeapDone);
+
     // -----------------------------------------------------------------------
     // 6. Register demo background task
     // -----------------------------------------------------------------------
     task::add_task(demo_task);
     serial::write_str("task added\n");
-
+    bench::stamp(bench::Phase::RamfsDone);
     // -----------------------------------------------------------------------
     // 7. Shell UI
     // -----------------------------------------------------------------------
@@ -278,6 +309,10 @@ unsafe fn run_shell(boot_info: *const boot::CoreOS_BootInfo) -> ! {
         boot_info,
     };
     let _ = write!(line, "> ");
+    bench::stamp(bench::Phase::ShellReady);
+    for line in crate::bench::report().lines() {
+        crate::serial_fmt!("{}\n", line);
+    }
 
     loop {
         // ── Clock ──────────────────────────────────────────────────────────

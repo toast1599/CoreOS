@@ -73,6 +73,8 @@ pub fn dispatch(shell: &Shell, ctx: &mut ShellContext) -> ShellOutput {
         cmd_font(buf, ctx)
     } else if cmd_is(buf, "exec") {
         cmd_exec(buf, ctx)
+    } else if cmd_is(buf, "boottime") {
+        cmd_boottime()
     } else if cmd_is(buf, "panic") {
         panic!("user-requested panic")
     } else if cmd_is(buf, "reboot") {
@@ -242,3 +244,13 @@ fn cmd_exec(buf: &[char; BUF_LEN], ctx: &ShellContext) -> ShellOutput {
         ShellOutput::Print(alloc::format!("spawned pid={}", pid))
     }
 }
+
+fn cmd_boottime() -> ShellOutput {
+    ShellOutput::PrintLines(
+        crate::bench::report()
+            .lines()
+            .map(|l| alloc::string::String::from(l))
+            .collect(),
+    )
+}
+

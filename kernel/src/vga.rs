@@ -1,4 +1,4 @@
-use crate::boot::{CoreOS_BootInfo, FONT};
+use crate::boot::CoreOS_BootInfo;
 use core::fmt::Write;
 use core::ptr::addr_of;
 
@@ -56,7 +56,8 @@ pub unsafe fn putchar(
     scale: usize,
     boot_info: *const CoreOS_BootInfo,
 ) {
-    let font_ptr = FONT.as_ptr();
+    let font_base = core::ptr::read_unaligned(core::ptr::addr_of!((*boot_info).font_base));
+    let font_ptr = font_base as *const u8;
     let header_size = core::ptr::read_unaligned(font_ptr.add(8) as *const u32) as usize;
     let bytes_per_glyph = core::ptr::read_unaligned(font_ptr.add(20) as *const u32) as usize;
     let font_height = core::ptr::read_unaligned(font_ptr.add(24) as *const u32) as usize;
@@ -91,4 +92,3 @@ pub unsafe fn clear_line(y: usize, scale: usize, boot_info: *const CoreOS_BootIn
     let width = core::ptr::read_unaligned(addr_of!((*boot_info).width)) as usize;
     draw_rect(0, y, width, 16 * scale, BG_COLOR, boot_info);
 }
-

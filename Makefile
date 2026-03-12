@@ -76,6 +76,7 @@ $(IMAGE): $(KERNEL_BIN) $(LOADER_EFI) user/test.elf
 	mcopy -i $(IMAGE) $(LOADER_EFI) ::/EFI/BOOT/
 	mcopy -i $(IMAGE) $(KERNEL_BIN) ::/
 	mcopy -i $(IMAGE) user/test.elf  ::/
+	mcopy -i $(IMAGE) assets/font.psfu ::/
 
 user/test.elf:
 	$(MAKE) -C user
@@ -92,7 +93,7 @@ run: $(IMAGE)
 		-serial stdio \
 		-vga std \
 		-m 512M \
-		-d int,cpu_reset \
+		-d cpu_reset \
 		-no-reboot -no-shutdown \
 # =========================
 # Project Context Dump
