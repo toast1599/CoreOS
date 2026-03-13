@@ -103,18 +103,47 @@ CONTEXT_FILE = .project_context.txt
 
 context:
 	@echo "Generating project context..."
-	@echo "# PROJECT CONTEXT DUMP - $(shell date)" > $(CONTEXT_FILE)
-	@echo "## Directory Tree" >> $(CONTEXT_FILE)
-	@tree -I 'target|build|.git' >> $(CONTEXT_FILE)
+	@echo "# PROJECT CONTEXT DUMP - $$(date)" > $(CONTEXT_FILE)
+
+	@echo "\n## Directory Tree" >> $(CONTEXT_FILE)
+	@eza --tree -a --git-ignore \
+	--ignore-glob='.git|target|build|node_modules|*.tmp|*.temp|*.log|*.cache|*.swp|*.bak|*.o|*.out|*.class|*.pyc|*.lock|*.bin|*.img|*.iso|__pycache__' \
+	>> $(CONTEXT_FILE)
+
 	@echo "\n## Makefile" >> $(CONTEXT_FILE)
+	@echo '```make' >> $(CONTEXT_FILE)
 	@cat Makefile >> $(CONTEXT_FILE)
-	@echo "\n## Bootloader Source" >> $(CONTEXT_FILE)
-	@cat $(LOADER_SRC) >> $(CONTEXT_FILE)
-	@echo "\n## Kernel Configuration" >> $(CONTEXT_FILE)
-	@cat kernel/Cargo.toml >> $(CONTEXT_FILE)
-	@cat kernel/linker.ld >> $(CONTEXT_FILE)
-	@echo "\n## Kernel Source" >> $(CONTEXT_FILE)
-	@find kernel/src -name "*.rs" -exec echo "\n--- File: {} ---" \; -exec cat {} \; >> $(CONTEXT_FILE)
+	@echo '```' >> $(CONTEXT_FILE)
+
+	@echo "\n## Source Files" >> $(CONTEXT_FILE)
+
+	@find . \
+	-type d \( -name .git -o -name build -o -name target -o -name node_modules -o -name __pycache__ \) -prune -o \
+	-type f \( \
+	-name "*.c" -o \
+	-name "*.h" -o \
+	-name "*.cpp" -o \
+	-name "*.hpp" -o \
+	-name "*.rs" -o \
+	-name "*.asm" -o \
+	-name "*.s" -o \
+	-name "*.S" -o \
+	-name "*.py" -o \
+	-name "*.go" -o \
+	-name "*.js" -o \
+	-name "*.ts" -o \
+	-name "*.java" -o \
+	-name "*.zig" -o \
+	-name "*.lua" \
+	\) | while read file; do \
+		ext=$${file##*.}; \
+		echo "\n### File: $$file" >> $(CONTEXT_FILE); \
+		echo "\`\`\`$$ext" >> $(CONTEXT_FILE); \
+		cat "$$file" >> $(CONTEXT_FILE); \
+		echo "\`\`\`" >> $(CONTEXT_FILE); \
+	done
+
+	@echo "\n---" >> $(CONTEXT_FILE)
 	@echo "Context written to $(CONTEXT_FILE)"
 
 copy: context
