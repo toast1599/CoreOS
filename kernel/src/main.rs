@@ -29,13 +29,13 @@ mod task;
 mod vga;
 
 use crate::heap::SlabAllocator;
-use crate::shell::{
-    commands::{ShellContext, ShellOutput},
-    Shell,
-};
 use core::fmt::Write;
 use core::panic::PanicInfo;
 use vga::Console;
+
+pub mod main_fs {
+    pub static mut FILESYSTEM: Option<crate::fs::RamFS> = None;
+}
 
 // ---------------------------------------------------------------------------
 // Global allocator
@@ -55,21 +55,15 @@ fn alloc_error(layout: core::alloc::Layout) -> ! {
 }
 
 // ---------------------------------------------------------------------------
-// Kernel-global state
-// ---------------------------------------------------------------------------
-
-static mut FILESYSTEM: Option<fs::RamFS> = None;
-
-// ---------------------------------------------------------------------------
 // Interrupt handlers (called from IDT stubs in idt.rs)
 // ---------------------------------------------------------------------------
 
 #[no_mangle]
 pub extern "C" fn keyboard_handler() {
     unsafe {
-        // EOI before processing so we don't block subsequent interrupts
         hw::pic::eoi(1);
         let scancode = hw::ps2::read_data();
+        crate::serial_fmt!("[KBD] scancode={:#x}\n", scancode);
         let c = hw::ps2::scancode_to_char(scancode);
         if c != '\0' {
             hw::kbd_buffer::KEYBUF.push(c);
@@ -191,7 +185,7 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
     // -----------------------------------------------------------------------
     // 4. Kernel subsystems
     // -----------------------------------------------------------------------
-    FILESYSTEM = Some(fs::RamFS::new());
+    main_fs::FILESYSTEM = Some(fs::RamFS::new());
 
     // Load saved ELF bytes into RamFS now that heap is available
     if ELF_LEN > 0 {
@@ -204,7 +198,7 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
             ELF_BUF[3]
         );
         let name: &[char] = &['t', 'e', 's', 't'];
-        if let Some(ref mut fs) = FILESYSTEM {
+        if let Some(ref mut fs) = main_fs::FILESYSTEM {
             if fs.create(name) {
                 if let Some(f) = fs.find_mut(name) {
                     f.data.extend_from_slice(&ELF_BUF[..ELF_LEN]);
@@ -220,6 +214,8 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
             }
         }
     }
+
+    vga::init_global(boot_info);
 
     gdt::init();
     serial::write_str("gdt ok\n");
@@ -295,173 +291,54 @@ unsafe fn run_shell(boot_info: *const boot::CoreOS_BootInfo) -> ! {
     let _ = write!(header, "CoreOS Shell v0.01");
     vga::draw_rect(20, 60, 550, 4, vga::CLOCK_COLOR, boot_info);
 
-    let mut global_scale: usize = 1;
-    let mut current_y: usize = 120;
-
-    let mut shell = Shell::new();
-
-    // Initial prompt
-    let mut line = Console {
-        x: 20,
-        y: current_y,
-        color: vga::TEXT_COLOR,
-        scale: global_scale,
-        boot_info,
-    };
-    let _ = write!(line, "> ");
-    bench::stamp(bench::Phase::ShellReady);
-    for line in crate::bench::report().lines() {
-        crate::serial_fmt!("{}\n", line);
-    }
+    serial::write_str("Starting default userspace shell...\n");
 
     loop {
-        // ── Clock ──────────────────────────────────────────────────────────
-        let (h, m, s) = hw::rtc::get_time();
-        let clock_x = width - 150;
-        vga::draw_rect(clock_x, 20, 130, 32, vga::BG_COLOR, boot_info);
-        draw_clock(boot_info, clock_x, 20, h, m, s);
-
-        // ── Key input ──────────────────────────────────────────────────────
-        // Block shell input while user process is alive.
-        if process::is_running() {
-            continue;
-        }
-
-        // Process just became zombie — reap it and show prompt.
-        if let Some(code) = process::reap() {
-            current_y += 16 * global_scale;
-            let mut con = Console {
-                x: 20,
-                y: current_y,
-                color: vga::TEXT_COLOR,
-                scale: global_scale,
-                boot_info,
-            };
-            let _ = write!(con, "process exited (code {})", code);
-            current_y += 16 * global_scale;
-            let mut prompt = Console {
-                x: 20,
-                y: current_y,
-                color: vga::TEXT_COLOR,
-                scale: global_scale,
-                boot_info,
-            };
-            let _ = write!(prompt, "> ");
-        }
-
-        core::arch::asm!("cli", options(nostack, nomem));
-        let key = hw::kbd_buffer::KEYBUF.pop();
-        core::arch::asm!("sti", options(nostack, nomem));
-
-        if let Some(c) = key {
-            match c {
-                // Backspace
-                '\x08' => {
-                    shell.pop();
-                    redraw_prompt(boot_info, current_y, global_scale, &shell);
+        let name: &[char] = &['t', 'e', 's', 't'];
+        let elf_data = {
+            if let Some(ref fs) = main_fs::FILESYSTEM {
+                if let Some(f) = fs.find(name) {
+                    Some(f.data.clone())
+                } else {
+                    None
                 }
-
-                // Enter — execute command
-                '\n' => {
-                    current_y += 16 * global_scale;
-                    if current_y + 16 * global_scale >= height {
-                        vga::clear_from(120, boot_info);
-                        current_y = 120;
-                    }
-
-                    let mut ctx = ShellContext {
-                        boot_info,
-                        filesystem: &mut FILESYSTEM,
-                        global_scale: &mut global_scale,
-                        current_y: &mut current_y,
-                        screen_h: height,
-                    };
-
-                    let output = shell.execute(&mut ctx);
-                    current_y = *ctx.current_y; // commands may update current_y
-
-                    match output {
-                        ShellOutput::Clear => {
-                            vga::clear_from(120, boot_info);
-                            current_y = 120;
-                        }
-                        ShellOutput::Print(s) => {
-                            let mut resp = Console {
-                                x: 20,
-                                y: current_y,
-                                color: vga::TEXT_COLOR,
-                                scale: global_scale,
-                                boot_info,
-                            };
-                            let _ = write!(resp, "{}", s);
-                            current_y += 16 * global_scale;
-                        }
-                        ShellOutput::PrintLines(lines) => {
-                            for line_str in lines {
-                                let mut resp = Console {
-                                    x: 20,
-                                    y: current_y,
-                                    color: vga::TEXT_COLOR,
-                                    scale: global_scale,
-                                    boot_info,
-                                };
-                                let _ = write!(resp, "{}", line_str);
-                                current_y += 16 * global_scale;
-                            }
-                        }
-                        ShellOutput::None => {}
-                    }
-
-                    // Next prompt
-                    let mut next = Console {
-                        x: 20,
-                        y: current_y,
-                        color: vga::TEXT_COLOR,
-                        scale: global_scale,
-                        boot_info,
-                    };
-                    let _ = write!(next, "> ");
-                }
-
-                // Printable character
-                _ => {
-                    let max_chars = (width - 40) / (8 * global_scale) - 2;
-                    if shell.cursor < max_chars && shell.cursor < 63 {
-                        shell.push(c);
-                        redraw_prompt(boot_info, current_y, global_scale, &shell);
-                    }
-                }
+            } else {
+                None
             }
+        };
+
+        if let Some(data) = elf_data {
+            let (pid, slot) = crate::exec::exec_as_task(&data);
+            if pid > 0 {
+                let mut last_s = 255u8;
+                // Wait for userspace shell to exit
+                while process::is_running_in_slot(slot) {
+                    // Update clock
+                    let (h, m, s) = hw::rtc::get_time();
+                    if s != last_s {
+                        let clock_x = width - 150;
+                        vga::draw_rect(clock_x, 20, 130, 32, vga::BG_COLOR, boot_info);
+                        draw_clock(boot_info, clock_x, 20, h, m, s);
+                        last_s = s;
+                    }
+
+                    core::arch::asm!("hlt");
+                }
+                if let Some(code) = process::reap_slot(slot) {
+                    serial_fmt!("Userspace shell (pid {}) exited with code {}. Restarting...\n", pid, code);
+                }
+            } else {
+                serial::write_str("Failed to spawn userspace shell. Hitting hlt loop.\n");
+                loop { core::arch::asm!("hlt"); }
+            }
+        } else {
+            serial::write_str("test.elf not found in RamFS. Hitting hlt loop.\n");
+            loop { core::arch::asm!("hlt"); }
         }
     }
 }
 
-// ---------------------------------------------------------------------------
-// UI helpers
-// ---------------------------------------------------------------------------
-
-/// Redraw the current input line: "> <buffer contents>".
-unsafe fn redraw_prompt(
-    boot_info: *const boot::CoreOS_BootInfo,
-    y: usize,
-    scale: usize,
-    shell: &Shell,
-) {
-    vga::clear_line(y, scale, boot_info);
-    let mut con = Console {
-        x: 20,
-        y,
-        color: vga::TEXT_COLOR,
-        scale,
-        boot_info,
-    };
-    let _ = write!(con, "> ");
-    for i in 0..shell.cursor {
-        let _ = write!(con, "{}", shell.buffer[i]);
-    }
-}
-
-/// Draw HH:MM:SS at (x, y) using the clock colour.
+/// HH:MM:SS draw helper for the kernel's top bar.
 unsafe fn draw_clock(
     boot_info: *const boot::CoreOS_BootInfo,
     x: usize,
@@ -493,7 +370,17 @@ unsafe fn draw_clock(
 // Default exception handler
 // ---------------------------------------------------------------------------
 
-pub extern "C" fn default_exception() {
+#[no_mangle]
+pub extern "C" fn default_exception(vector: u64) {
+    unsafe {
+        core::arch::asm!("sti");
+        crate::serial_fmt!("[EXCEPTION] fault #{} in task — marking dead\n", vector);
+        // Mark process as exited with error code so kernel shell can reap it
+        crate::process::exit(vector as i64);
+        if let Some(slot) = crate::task::current_task_slot() {
+            crate::task::kill_task(slot);
+        }
+    }
     loop {
         unsafe {
             core::arch::asm!("hlt");

@@ -12,9 +12,7 @@ pub struct RamFS {
 
 impl RamFS {
     pub fn new() -> Self {
-        Self {
-            files: Vec::new(),
-        }
+        Self { files: Vec::new() }
     }
 
     pub fn create(&mut self, name: &[char]) -> bool {
@@ -43,8 +41,8 @@ impl RamFS {
     }
 
     pub fn remove(&mut self, name: &[char]) -> bool {
-        if let Some(pos) = self.files.iter().position(|f| f.name == name) {
-            self.files.remove(pos);
+        if let Some(idx) = self.files.iter().position(|f| f.name.as_slice() == name) {
+            self.files.remove(idx);
             true
         } else {
             false

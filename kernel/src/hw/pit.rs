@@ -19,19 +19,22 @@ pub fn ticks() -> u64 {
 /// Sends EOI to the PIC, then increments the tick counter and runs the scheduler.
 #[no_mangle]
 pub extern "C" fn pit_handler(_stack: *mut u8) {
-    // EOI first so the PIC can accept the next interrupt while we're in here.
     unsafe {
         crate::hw::pic::eoi(0);
     }
     TICKS.fetch_add(1, Ordering::Relaxed);
     scheduler::tick();
 }
-
-/// Busy-wait for `wait_ticks` ticks.
-pub fn sleep(wait_ticks: u64) {
+/// Yielding wait for `wait_ticks` ticks.
+pub fn sleep_yield(wait_ticks: u64) {
     let start = ticks();
     while ticks() - start < wait_ticks {
-        core::hint::spin_loop();
+        unsafe {
+            scheduler::yield_now();
+        }
+        for _ in 0..1000 {
+            core::hint::spin_loop();
+        }
     }
 }
 
@@ -48,4 +51,3 @@ pub unsafe fn init() {
 pub fn uptime_seconds() -> u64 {
     ticks() / 100
 }
-

@@ -158,8 +158,6 @@ pub fn report() -> alloc::string::String {
         } else {
             0
         };
-        let label = Phase::KernelEntry.label(); // placeholder — override below
-
         let label = match i {
             0 => Phase::KernelEntry.label(),
             1 => Phase::PmmDone.label(),

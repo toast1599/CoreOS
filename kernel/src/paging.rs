@@ -86,3 +86,47 @@ unsafe fn map_range_2mb(pml4: usize, start: usize, end: usize) {
         addr += two_mb;
     }
 }
+
+pub unsafe fn map_page(virt: usize, phys: usize) {
+    let cr3: u64;
+    core::arch::asm!("mov {}, cr3", out(reg) cr3, options(nomem, nostack));
+    let pml4 = (cr3 & !0xFFF) as usize;
+
+    let pml4_i = (virt >> 39) & 0x1FF;
+    let pdpt_i = (virt >> 30) & 0x1FF;
+    let pd_i = (virt >> 21) & 0x1FF;
+    let pt_i = (virt >> 12) & 0x1FF;
+
+    let pml4_ptr = (pml4 + pml4_i * 8) as *mut u64;
+    if *pml4_ptr == 0 {
+        let t = alloc_table();
+        pml4_ptr.write_volatile(t as u64 | PTE_PRESENT | PTE_WRITABLE | PTE_USER);
+    }
+    let pdpt = (*pml4_ptr & !0xFFF) as usize;
+
+    let pdpt_ptr = (pdpt + pdpt_i * 8) as *mut u64;
+    if *pdpt_ptr == 0 {
+        let t = alloc_table();
+        pdpt_ptr.write_volatile(t as u64 | PTE_PRESENT | PTE_WRITABLE | PTE_USER);
+    }
+    let pd = (*pdpt_ptr & !0xFFF) as usize;
+
+    let pd_ptr = (pd + pd_i * 8) as *mut u64;
+    if *pd_ptr == 0 {
+        let t = alloc_table();
+        pd_ptr.write_volatile(t as u64 | PTE_PRESENT | PTE_WRITABLE | PTE_USER);
+    }
+    // Check if it's already a huge page
+    if (*pd_ptr & PTE_HUGE) != 0 {
+        // Can't map a 4k page over a 2mb huge page easily without splitting.
+        // For now, assume we're mapping in a range not already huge-mapped.
+        return;
+    }
+    let pt = (*pd_ptr & !0xFFF) as usize;
+
+    let pt_ptr = (pt + pt_i * 8) as *mut u64;
+    pt_ptr.write_volatile(phys as u64 | PTE_PRESENT | PTE_WRITABLE | PTE_USER);
+
+    // Flush TLB
+    core::arch::asm!("invlpg [{}]", in(reg) virt, options(nostack, nomem));
+}

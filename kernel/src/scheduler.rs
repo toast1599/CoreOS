@@ -10,22 +10,26 @@
 ///   - Loads new_rsp into rsp
 ///   - Pops callee-saved registers from the NEW stack
 ///   - Returns → lands at the new task's saved rip
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-static TICKS: AtomicU64 = AtomicU64::new(0);
+#[no_mangle]
+pub static IN_SYSCALL: AtomicBool = AtomicBool::new(false);
 
-/// How many PIT ticks between context switches (~20 ms at 100 Hz)
-const SWITCH_INTERVAL: u64 = 10;
-
-pub fn ticks() -> u64 {
-    TICKS.load(Ordering::Relaxed)
+/// Voluntarily yield the CPU to the next task.
+pub unsafe fn yield_now() {
+    let in_syscall = IN_SYSCALL.load(Ordering::Relaxed);
+    IN_SYSCALL.store(false, Ordering::Relaxed);
+    try_switch();
+    IN_SYSCALL.store(in_syscall, Ordering::Relaxed);
 }
+
+// TICKS is now centrally located in hw::pit::TICKS
 
 /// Called from the PIT interrupt handler (pit_handler in pit.rs).
 pub fn tick() {
-    let t = TICKS.fetch_add(1, Ordering::Relaxed) + 1;
+    let t = crate::hw::pit::ticks();
 
-    if t % SWITCH_INTERVAL == 0 {
+    if t % 10 == 0 { // switch every 10 ticks
         unsafe {
             try_switch();
         }
@@ -33,6 +37,9 @@ pub fn tick() {
 }
 
 unsafe fn try_switch() {
+    if IN_SYSCALL.load(Ordering::Relaxed) {
+        return;
+    }
     if let Some((old_rsp_ptr, new_rsp)) = crate::task::next_task_switch() {
         switch_to(old_rsp_ptr, new_rsp);
     }
@@ -84,4 +91,3 @@ unsafe extern "C" fn switch_to(old_rsp: *mut usize, new_rsp: usize) {
         "ret",
     );
 }
-

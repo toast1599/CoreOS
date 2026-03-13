@@ -5,7 +5,7 @@
 /// and returns the entry point address.
 ///
 /// Does NOT set up page tables or drop to ring 3 — that is the caller's job.
-use crate::pmm::{alloc_frame, PAGE_SIZE};
+use crate::pmm::PAGE_SIZE;
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -209,13 +209,12 @@ pub unsafe fn load(data: &[u8]) -> Result<u64, ElfError> {
         let mut page = page_start;
 
         while page < page_end {
-            let frame = alloc_frame();
-            if frame == 0 {
-                crate::dbg_log!("ELF", "OOM at vaddr={:#x}", page);
-                return Err(ElfError::OomLoadingSegment);
-            }
-            // In the identity map vaddr == paddr, so the frame IS the page.
-            // Zero it first (alloc_frame already zeroes, but be explicit).
+            // In our identity-mapped setup, virt == phys for the first 4 GB.
+            // We must mark these frames as used in the PMM so no future
+            // allocator (heap, task stack, another ELF load) clobbers them.
+            crate::pmm::mark_frame_used(page);
+
+            // Zero the page so BSS and inter-segment gaps are clean.
             core::ptr::write_bytes(page as *mut u8, 0, PAGE_SIZE);
             page += PAGE_SIZE;
         }

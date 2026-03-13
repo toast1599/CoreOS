@@ -1,6 +1,6 @@
 use core::arch::global_asm;
+extern crate alloc;
 
-// MSR addresses
 const MSR_EFER: u32 = 0xC000_0080;
 const MSR_STAR: u32 = 0xC000_0081;
 const MSR_LSTAR: u32 = 0xC000_0082;
@@ -11,9 +11,7 @@ unsafe fn wrmsr(msr: u32, val: u64) {
     let hi = (val >> 32) as u32;
     core::arch::asm!(
         "wrmsr",
-        in("ecx") msr,
-        in("eax") lo,
-        in("edx") hi,
+        in("ecx") msr, in("eax") lo, in("edx") hi,
         options(nostack, nomem)
     );
 }
@@ -23,33 +21,24 @@ unsafe fn rdmsr(msr: u32) -> u64 {
     let hi: u32;
     core::arch::asm!(
         "rdmsr",
-        in("ecx") msr,
-        out("eax") lo,
-        out("edx") hi,
+        in("ecx") msr, out("eax") lo, out("edx") hi,
         options(nostack, nomem)
     );
     ((hi as u64) << 32) | lo as u64
 }
 
 pub unsafe fn init() {
-    // Enable SCE (syscall extensions) in EFER
     let efer = rdmsr(MSR_EFER);
     wrmsr(MSR_EFER, efer | 1);
 
-    // STAR layout (bits):
-    //   [63:48] user CS-8  (sysret loads this+8 for CS, this+0 for SS) → 0x18
-    //   [47:32] kernel CS  (syscall loads this for CS, this+8 for SS)  → 0x08
-    //   [31:0]  unused (set to 0)
-    //
-    // So: kernel CS = 0x08, user CS-8 = 0x18 (sysret gives 0x20 | 3 for CS, 0x18 | 3 for SS)
+    // STAR: bits[47:32] = kernel CS (0x08), bits[63:48] = user CS - 16 (0x18)
     let star: u64 = (0x0018u64 << 48) | (0x0008u64 << 32);
     wrmsr(MSR_STAR, star);
 
-    // LSTAR = address of our asm entry stub
     wrmsr(MSR_LSTAR, syscall_entry as u64);
 
-    // SFMASK = clear IF (bit 9) on syscall entry so interrupts don't fire
-    // while we're mid-entry before we've swapped the stack
+    // SFMASK: clear IF (bit 9) on syscall entry so we start with interrupts off.
+    // We never re-enable them inside the handler — sysretq restores R11 → RFLAGS.
     wrmsr(MSR_SFMASK, 1 << 9);
 
     crate::dbg_log!(
@@ -59,144 +48,185 @@ pub unsafe fn init() {
     );
 }
 
-// Declared here so we can take its address above; defined in the global_asm below
 extern "C" {
     fn syscall_entry();
+    static mut TSS_RSP0: u64;
 }
 
 global_asm!(
     r#"
+// -----------------------------------------------------------------------
+// syscall_entry
+//
+// Calling state (after `syscall` instruction):
+//   RCX  = saved user RIP
+//   R11  = saved user RFLAGS  (includes IF=1)
+//   RSP  = user stack pointer  (MUST NOT be touched before saving)
+//   RAX  = syscall number
+//   RDI  = arg1, RSI = arg2, RDX = arg3
+//   IF   = 0  (cleared by SFMASK)
+//
+// Stack layout after all pushes (RSP grows down):
+//   [rsp+  0]  rbp
+//   [rsp+  8]  r15
+//   [rsp+ 16]  r14
+//   [rsp+ 24]  r13
+//   [rsp+ 32]  r12
+//   [rsp+ 40]  r9
+//   [rsp+ 48]  r8
+//   [rsp+ 56]  rsi      ← arg2
+//   [rsp+ 64]  rdi      ← arg1
+//   [rsp+ 72]  rdx      ← arg3
+//   [rsp+ 80]  rbx
+//   [rsp+ 88]  rax      ← syscall number
+//   [rsp+ 96]  rcx      ← saved user RIP
+//   [rsp+104]  r11      ← saved user RFLAGS
+//   [rsp+112]  r10      ← saved user RSP
+//
+// DO NOT `sti` anywhere in this path. SFMASK cleared IF; sysretq
+// restores it from R11.  Any `sti` here risks a PIT preemption that
+// calls switch_to() with a live syscall frame on the stack.
+// -----------------------------------------------------------------------
 .global syscall_entry
 syscall_entry:
-    // On entry (CPU has done this automatically):
-    //   RCX = user RIP (return address)
-    //   R11 = user RFLAGS
-    //   RSP = still the USER stack  <- we must swap this immediately
-    //   CS/SS already set to kernel selectors
+    // Save user RSP, switch to kernel syscall stack.
+    mov  r10, rsp
+    lea  rsp, [rip + TSS_RSP0]
+    mov  rsp, [rsp]
 
-    // Save user RSP, then switch to kernel stack via TSS_RSP0
-    mov r10, rsp
-    lea rsp, [rip + TSS_RSP0]
-    mov rsp, [rsp]
+    // Push full register context (interrupts are OFF — stay that way).
+    push r10      // [rsp+112] user RSP
+    push r11      // [rsp+104] user RFLAGS
+    push rcx      // [rsp+ 96] user RIP
+    push rax      // [rsp+ 88] syscall number
+    push rbx      // [rsp+ 80]
+    push rdx      // [rsp+ 72] arg3
+    push rdi      // [rsp+ 64] arg1
+    push rsi      // [rsp+ 56] arg2
+    push r8       // [rsp+ 48]
+    push r9       // [rsp+ 40]
+    push r12      // [rsp+ 32]
+    push r13      // [rsp+ 24]
+    push r14      // [rsp+ 16]
+    push r15      // [rsp+  8]
+    push rbp      // [rsp+  0]
 
-    // Stack frame (pushed in this order, so offsets below are from the
-    // stack pointer AFTER all pushes):
-    //
-    //   [rsp+ 0] rbp
-    //   [rsp+ 8] r15
-    //   [rsp+16] r14
-    //   [rsp+24] r13
-    //   [rsp+32] r12
-    //   [rsp+40] r9
-    //   [rsp+48] r8
-    //   [rsp+56] rsi   ← original arg2 (syscall arg2)
-    //   [rsp+64] rdi   ← original arg1 (syscall arg1)
-    //   [rsp+72] rdx   ← original arg3 (syscall arg3)
-    //   [rsp+80] rbx
-    //   [rsp+88] rax   ← syscall number (we overwrite this with retval before pop)
-    //   [rsp+96] rcx   ← user RIP
-    //   [rsp+104] r11  ← user RFLAGS
-    //   [rsp+112] r10  ← user RSP
+    lea  rax, [rip + IN_SYSCALL]
+    mov  byte ptr [rax], 1          
 
-    push r10        // user rsp
-    push r11        // user rflags
-    push rcx        // user rip (sysretq return address)
-    push rax        // syscall number  ← will be overwritten with retval below
-    push rbx
-    push rdx
-    push rdi
-    push rsi
-    push r8
-    push r9
-    push r12
-    push r13
-    push r14
-    push r15
-    push rbp
+    // Set up syscall_dispatch(num, arg1, arg2, arg3).
+    mov  rdi, [rsp + 8*11]   // rax slot  → syscall number
+    mov  rsi, [rsp + 8*8]    // rdi slot  → arg1
+    mov  rdx, [rsp + 8*7]    // rsi slot  → arg2
+    mov  rcx, [rsp + 8*9]    // rdx slot  → arg3
 
-    // Set up args for syscall_dispatch(num, arg1, arg2, arg3)
-    // System V: rdi=arg0, rsi=arg1, rdx=arg2, rcx=arg3
-    // We saved the originals on the stack; read them back from their slots.
-    mov rdi, [rsp + 8*11]   // rax slot = syscall number
-    mov rsi, [rsp + 8*7]    // rdi slot = arg1
-    mov rdx, [rsp + 8*6]    // rsi slot = arg2  (note: rdx was pushed at rsp+72 = 8*9 from bottom, recount below)
-    mov rcx, [rsp + 8*9]    // rdx slot = arg3
+    call syscall_dispatch
 
-    // Stack from bottom (rsp=0 is rbp):
-    // 0:rbp 1:r15 2:r14 3:r13 4:r12 5:r9 6:r8 7:rsi 8:rdi 9:rdx 10:rbx 11:rax 12:rcx 13:r11 14:r10
-    mov rdi, [rsp + 8*11]   // syscall number (rax slot)
-    mov rsi, [rsp + 8*8]    // arg1 (rdi slot)
-    mov rdx, [rsp + 8*7]    // arg2 (rsi slot)
-    mov rcx, [rsp + 8*9]    // arg3 (rdx slot)
+    // Store return value back into the rax slot so it's restored below.
+    mov  [rsp + 8*11], rax
 
-    call syscall_dispatch    // return value lands in rax
+    lea  rax, [rip + IN_SYSCALL]
+    mov  byte ptr [rax], 0
 
-    // Write retval directly into the rax slot on the stack so the pop
-    // below picks it up correctly — no separate stash register needed.
-    mov [rsp + 8*11], rax
+    // Restore full context.
+    pop  rbp
+    pop  r15
+    pop  r14
+    pop  r13
+    pop  r12
+    pop  r9
+    pop  r8
+    pop  rsi
+    pop  rdi
+    pop  rdx
+    pop  rbx
+    pop  rax      // return value (already in rax from the mov above, but restore cleanly)
+    pop  rcx      // user RIP → RCX for sysretq
+    pop  r11      // user RFLAGS → R11 for sysretq  (includes IF=1)
+    pop  r10      // user RSP
 
-    // Restore all saved registers
-    pop rbp
-    pop r15
-    pop r14
-    pop r13
-    pop r12
-    pop r9
-    pop r8
-    pop rsi
-    pop rdi
-    pop rdx
-    pop rbx
-    pop rax         // ← retval from syscall_dispatch (written above)
-    pop rcx         // user rip
-    pop r11         // user rflags
-    pop r10         // user rsp
-    mov rsp, r10    // restore user stack
-
-    sysretq
+    mov  rsp, r10
+    sysretq       // restores RIP from RCX, RFLAGS from R11 (re-enables interrupts)
 "#
 );
 
-/// Rust syscall dispatcher.
-/// num = syscall number, arg1/arg2/arg3 = first three arguments.
-/// Return value is passed back to userspace in rax.
+// ---------------------------------------------------------------------------
+// Filesystem helpers (unchanged)
+// ---------------------------------------------------------------------------
+
+unsafe fn fs_find_idx(name: &[char]) -> Option<usize> {
+    crate::main_fs::FILESYSTEM
+        .as_ref()?
+        .files
+        .iter()
+        .position(|f| f.name.as_slice() == name)
+}
+
+unsafe fn fs_file_size(file_idx: usize) -> usize {
+    match crate::main_fs::FILESYSTEM.as_ref() {
+        Some(fs) if file_idx < fs.files.len() => fs.files[file_idx].data.len(),
+        _ => 0,
+    }
+}
+
+unsafe fn fs_read(file_idx: usize, offset: usize, buf: *mut u8, count: usize) -> usize {
+    let fs = match crate::main_fs::FILESYSTEM.as_ref() {
+        Some(f) => f,
+        None => return 0,
+    };
+    if file_idx >= fs.files.len() {
+        return 0;
+    }
+    let data = &fs.files[file_idx].data;
+    let available = data.len().saturating_sub(offset);
+    let to_read = count.min(available);
+    if to_read == 0 {
+        return 0;
+    }
+    core::ptr::copy_nonoverlapping(data[offset..].as_ptr(), buf, to_read);
+    to_read
+}
+
+unsafe fn fs_clone_by_name(name: &[char]) -> Option<alloc::vec::Vec<u8>> {
+    let fs = crate::main_fs::FILESYSTEM.as_ref()?;
+    let file = fs.files.iter().find(|f| f.name.as_slice() == name)?;
+    Some(file.data.clone())
+}
+
+// ---------------------------------------------------------------------------
+// Dispatcher
+// ---------------------------------------------------------------------------
+
 #[no_mangle]
 pub extern "C" fn syscall_dispatch(num: u64, arg1: u64, arg2: u64, arg3: u64) -> u64 {
-    crate::serial_fmt!("[SYSCALL] num={}\n", num);
     match num {
-        0 => {
-            // read(fd, buf, count) — stub: no userspace stdin yet
-            let _ = (arg1, arg2, arg3);
-            u64::MAX
-        }
-        1 => {
-            // write(fd, buf, count) — dump to serial for now
-            let buf = arg2 as *const u8;
-            let len = arg3 as usize;
-            unsafe {
-                for i in 0..len {
-                    crate::serial::write_byte(*buf.add(i));
-                }
+        0 => unsafe { syscall_read(arg1, arg2, arg3) },
+        1 => unsafe { syscall_write(arg1, arg2, arg3) },
+        3 => unsafe { syscall_open(arg1, arg2) },
+        4 => unsafe {
+            if crate::process::close_fd(arg1 as usize) {
+                0
+            } else {
+                u64::MAX
             }
-            len as u64
-        }
-        12 => {
-            // brk(addr)
-            // If addr == 0: return current break.
-            // If addr > current break: grow by allocating pages.
-            // Returns new break on success, old break on OOM.
-            unsafe { syscall_brk(arg1) }
-        }
+        },
+        5 => unsafe { syscall_fsize(arg1) },
+        6 => unsafe { syscall_ls(arg1, arg2) },
+        7 => unsafe { syscall_touch(arg1, arg2) },
+        8 => unsafe { syscall_rm(arg1, arg2) },
+        9 => unsafe { syscall_write_file(arg1, arg2, arg3) },
+        10 => unsafe { syscall_push_file(arg1, arg2, arg3) },
+        12 => unsafe { syscall_brk(arg1) },
+        57 => unsafe { syscall_exec(arg1, arg2) },
         60 => {
-            // exit(code)
             crate::dbg_log!("SYSCALL", "exit({})", arg1);
             unsafe {
                 crate::process::exit(arg1 as i64);
-                if let Some(slot) = crate::process::current_task_slot() {
+                if let Some(slot) = crate::task::current_task_slot() {
                     crate::task::kill_task(slot);
                 }
-                // Re-enable interrupts so the PIT fires and the scheduler
-                // can switch away from this dead task.
+                // Re-enable interrupts so the scheduler can run and
+                // eventually switch away from this dead task.
                 core::arch::asm!("sti");
             }
             loop {
@@ -205,58 +235,359 @@ pub extern "C" fn syscall_dispatch(num: u64, arg1: u64, arg2: u64, arg3: u64) ->
                 }
             }
         }
+        61 => unsafe { syscall_waitpid(arg1) },
+        20 => {
+            crate::pmm::free_bytes() as u64
+        },
+        21 => crate::hw::pit::uptime_seconds(),
+        22 => crate::hw::pit::ticks(),
+        23 => unsafe {
+            crate::hw::reboot();
+        },
+        24 => panic!("user-requested panic via syscall"),
+        25 => unsafe { syscall_boottime(arg1, arg2) },
+        26 => unsafe {
+            crate::vga::clear_terminal_area();
+            crate::vga::set_userspace_cursor(20, 120);
+            0
+        },
+        27 => {
+            crate::hw::pit::sleep_yield(arg1);
+            0
+        }
+        28 => {
+            crate::vga::set_font_scale(arg1 as usize);
+            0
+        }
         _ => {
             crate::dbg_log!("SYSCALL", "unhandled syscall {}", num);
-            u64::MAX // errno-style -1
+            u64::MAX
         }
     }
 }
 
 // ---------------------------------------------------------------------------
-// brk implementation
+// write — fd 1/2: serial + framebuffer. No sti needed.
 // ---------------------------------------------------------------------------
 
-/// Start the program break well above the kernel's identity-mapped region.
-/// 0x0000_7fff_0000_0000 is in the user half of the address space.
-static mut PROGRAM_BREAK: usize = 0x4000_0000;
+unsafe fn syscall_write(_fd: u64, buf_ptr: u64, count: u64) -> u64 {
+    let buf = buf_ptr as *const u8;
+    let len = count as usize;
+    for i in 0..len {
+        let b = *buf.add(i);
+        crate::serial::write_byte(b);
+        crate::vga::write_byte_to_fb(b);
+    }
+    len as u64
+}
+
+// ---------------------------------------------------------------------------
+// read — stdin blocks with sti/cli bracket; never hlt, never yields.
+// ---------------------------------------------------------------------------
+
+unsafe fn syscall_read(fd: u64, buf_ptr: u64, count: u64) -> u64 {
+    crate::serial_fmt!("[READ] fd={} buf={:#x} count={}\n", fd, buf_ptr, count);
+    let buf = buf_ptr as *mut u8;
+    let count = count as usize;
+    if count == 0 {
+        return 0;
+    }
+
+    if fd == 0 {
+        for i in 0..count {
+            crate::serial_fmt!("[READ] waiting\n");
+
+            let c = loop {
+                // Lower IN_SYSCALL so the scheduler can preempt while we wait.
+                // The syscall frame is stable here — just spinning for a keypress.
+                crate::scheduler::IN_SYSCALL.store(false, core::sync::atomic::Ordering::Relaxed);
+
+                core::arch::asm!("sti", options(nostack, nomem));
+                for _ in 0..2000 {
+                    core::hint::spin_loop();
+                }
+                core::arch::asm!("cli", options(nostack, nomem));
+
+                // Restore before touching any kernel state.
+                crate::scheduler::IN_SYSCALL.store(true, core::sync::atomic::Ordering::Relaxed);
+
+                if let Some(c) = crate::hw::kbd_buffer::KEYBUF.pop() {
+                    break c;
+                }
+            };
+
+            buf.add(i).write(c as u8);
+            crate::serial_fmt!("[READ] got {:#x}\n", c as u8);
+        }
+        return count as u64;
+    }
+
+    // File descriptor read.
+    let fd_usize = fd as usize;
+    let of = match crate::process::get_fd_mut(fd_usize) {
+        Some(f) => f,
+        None => {
+            crate::dbg_log!("SYSCALL", "read: bad fd {}", fd_usize);
+            return u64::MAX;
+        }
+    };
+    let bytes_read = fs_read(of.file_idx, of.offset, buf, count);
+    of.offset += bytes_read;
+    bytes_read as u64
+}
+
+// ---------------------------------------------------------------------------
+// open / close / fsize
+// ---------------------------------------------------------------------------
+
+unsafe fn syscall_open(path_ptr: u64, path_len: u64) -> u64 {
+    if path_len == 0 || path_len > 64 {
+        return u64::MAX;
+    }
+    let path_bytes = core::slice::from_raw_parts(path_ptr as *const u8, path_len as usize);
+    let mut name_buf = ['\0'; 64];
+    for (i, &b) in path_bytes.iter().enumerate() {
+        name_buf[i] = b as char;
+    }
+    let name = &name_buf[..path_len as usize];
+    let file_idx = match fs_find_idx(name) {
+        Some(i) => i,
+        None => return u64::MAX,
+    };
+    let fd = crate::process::alloc_fd(file_idx);
+    if fd < 0 {
+        u64::MAX
+    } else {
+        fd as u64
+    }
+}
+
+unsafe fn syscall_fsize(fd: u64) -> u64 {
+    let of = match crate::process::get_fd(fd as usize) {
+        Some(f) => f,
+        None => return u64::MAX,
+    };
+    fs_file_size(of.file_idx) as u64
+}
+
+// ---------------------------------------------------------------------------
+// exec / waitpid
+// ---------------------------------------------------------------------------
+
+unsafe fn syscall_exec(path_ptr: u64, path_len: u64) -> u64 {
+    if path_len == 0 || path_len > 64 {
+        return 0;
+    }
+    let path_bytes = core::slice::from_raw_parts(path_ptr as *const u8, path_len as usize);
+    let mut name_buf = ['\0'; 64];
+    for (i, &b) in path_bytes.iter().enumerate() {
+        name_buf[i] = b as char;
+    }
+    let name = &name_buf[..path_len as usize];
+    let elf_bytes = match fs_clone_by_name(name) {
+        Some(v) => v,
+        None => {
+            crate::dbg_log!("SYSCALL", "exec: file not found");
+            return 0;
+        }
+    };
+    let (pid, _slot) = crate::exec::exec_as_task(elf_bytes.as_slice());
+    pid as u64
+}
+
+unsafe fn syscall_waitpid(pid: u64) -> u64 {
+    // Find slot for this pid
+    let target_pid = pid as usize;
+    let mut slot = None;
+    for i in 0..8 {
+        if let Some(ref p) = crate::process::PROCESSES[i] {
+            if p.pid == target_pid {
+                slot = Some(i);
+                break;
+            }
+        }
+    }
+
+    let slot = match slot {
+        Some(s) => s,
+        None => return u64::MAX,
+    };
+
+    loop {
+        if !crate::process::is_running_in_slot(slot) {
+            break;
+        }
+        crate::scheduler::yield_now();
+        core::hint::spin_loop();
+    }
+    match crate::process::reap_slot(slot) {
+        Some(code) => code as u64,
+        None => u64::MAX,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// brk
+// ---------------------------------------------------------------------------
 
 unsafe fn syscall_brk(addr: u64) -> u64 {
+    let current_brk = crate::process::current_brk();
     if addr == 0 {
-        return PROGRAM_BREAK as u64;
+        return current_brk as u64;
     }
-
     let new_brk = addr as usize;
-    if new_brk <= PROGRAM_BREAK {
-        // Shrinking or no-op — just update the break.
-        PROGRAM_BREAK = new_brk;
-        return PROGRAM_BREAK as u64;
+    if new_brk <= current_brk {
+        crate::process::set_brk(new_brk);
+        return new_brk as u64;
     }
 
-    // Growing — allocate physical pages to cover [old_break..new_brk).
-    // Round current break up to next page boundary to find first unmapped page.
-    let mut page = (PROGRAM_BREAK + 0xFFF) & !0xFFF;
+    // Align both to next page boundary to see if we need new pages
+    let mut page = (current_brk + 0xFFF) & !0xFFF;
     let end = (new_brk + 0xFFF) & !0xFFF;
 
     while page < end {
         let frame = crate::pmm::alloc_frame();
         if frame == 0 {
-            // OOM — return the old break to signal failure to libc.
-            crate::dbg_log!("BRK", "OOM growing break to {:#x}", new_brk);
-            return PROGRAM_BREAK as u64;
+            crate::dbg_log!("BRK", "OOM");
+            return current_brk as u64;
         }
-        // The kernel uses an identity map for the first 4 GB, so
-        // physical == virtual. For addresses above 4 GB (like our break
-        // base) you will need to wire up a page-table mapping here once
-        // you have proper userspace paging. For now this is fine for
-        // testing musl-linked binaries running in ring 0 / kernel space.
+        // Map the new physical frame to the virtual address 'page'
+        crate::paging::map_page(page, frame);
         page += 0x1000;
     }
 
-    PROGRAM_BREAK = new_brk;
-    crate::dbg_log!("BRK", "break → {:#x}", PROGRAM_BREAK);
-    PROGRAM_BREAK as u64
+    crate::process::set_brk(new_brk);
+    new_brk as u64
 }
 
-extern "C" {
-    static mut TSS_RSP0: u64;
+// ---------------------------------------------------------------------------
+// ls / touch / rm / write_file / push_file
+// ---------------------------------------------------------------------------
+
+unsafe fn syscall_ls(buf_ptr: u64, buf_len: u64) -> u64 {
+    let fs = match crate::main_fs::FILESYSTEM.as_ref() {
+        Some(f) => f,
+        None => return 0,
+    };
+    let buf = buf_ptr as *mut u8;
+    let buf_len = buf_len as usize;
+    let mut pos = 0usize;
+    for file in fs.files.iter() {
+        for &ch in file.name.iter() {
+            if pos + 1 >= buf_len {
+                break;
+            }
+            buf.add(pos).write(ch as u8);
+            pos += 1;
+        }
+        if pos < buf_len {
+            buf.add(pos).write(0);
+            pos += 1;
+        }
+    }
+    pos as u64
+}
+
+unsafe fn syscall_touch(name_ptr: u64, name_len: u64) -> u64 {
+    if name_len == 0 || name_len > 64 {
+        return u64::MAX;
+    }
+    let bytes = core::slice::from_raw_parts(name_ptr as *const u8, name_len as usize);
+    let mut name_buf = ['\0'; 64];
+    for (i, &b) in bytes.iter().enumerate() {
+        name_buf[i] = b as char;
+    }
+    let name = &name_buf[..name_len as usize];
+    match crate::main_fs::FILESYSTEM.as_mut() {
+        Some(fs) => {
+            if fs.create(name) {
+                0
+            } else {
+                u64::MAX
+            }
+        }
+        None => u64::MAX,
+    }
+}
+
+unsafe fn syscall_rm(name_ptr: u64, name_len: u64) -> u64 {
+    if name_len == 0 || name_len > 64 {
+        return u64::MAX;
+    }
+    let bytes = core::slice::from_raw_parts(name_ptr as *const u8, name_len as usize);
+    let mut name_buf = ['\0'; 64];
+    for (i, &b) in bytes.iter().enumerate() {
+        name_buf[i] = b as char;
+    }
+    let name = &name_buf[..name_len as usize];
+    match crate::main_fs::FILESYSTEM.as_mut() {
+        Some(fs) => {
+            if fs.remove(name) {
+                0
+            } else {
+                u64::MAX
+            }
+        }
+        None => u64::MAX,
+    }
+}
+
+unsafe fn syscall_write_file(name_ptr: u64, name_len: u64, args_ptr: u64) -> u64 {
+    if name_len == 0 || name_len > 64 {
+        return u64::MAX;
+    }
+    let data_ptr = (args_ptr as *const u64).read();
+    let data_len = (args_ptr as *const u64).add(1).read() as usize;
+    let bytes = core::slice::from_raw_parts(name_ptr as *const u8, name_len as usize);
+    let mut name_buf = ['\0'; 64];
+    for (i, &b) in bytes.iter().enumerate() {
+        name_buf[i] = b as char;
+    }
+    let name = &name_buf[..name_len as usize];
+    let fs = match crate::main_fs::FILESYSTEM.as_mut() {
+        Some(f) => f,
+        None => return u64::MAX,
+    };
+    let file = match fs.find_mut(name) {
+        Some(f) => f,
+        None => return u64::MAX,
+    };
+    file.data.clear();
+    let src = core::slice::from_raw_parts(data_ptr as *const u8, data_len);
+    file.data.extend_from_slice(src);
+    0
+}
+
+unsafe fn syscall_push_file(name_ptr: u64, name_len: u64, args_ptr: u64) -> u64 {
+    if name_len == 0 || name_len > 64 {
+        return u64::MAX;
+    }
+    let data_ptr = (args_ptr as *const u64).read();
+    let data_len = (args_ptr as *const u64).add(1).read() as usize;
+    let bytes = core::slice::from_raw_parts(name_ptr as *const u8, name_len as usize);
+    let mut name_buf = ['\0'; 64];
+    for (i, &b) in bytes.iter().enumerate() {
+        name_buf[i] = b as char;
+    }
+    let name = &name_buf[..name_len as usize];
+    let fs = match crate::main_fs::FILESYSTEM.as_mut() {
+        Some(f) => f,
+        None => return u64::MAX,
+    };
+    let file = match fs.find_mut(name) {
+        Some(f) => f,
+        None => return u64::MAX,
+    };
+    let src = core::slice::from_raw_parts(data_ptr as *const u8, data_len);
+    file.data.extend_from_slice(src);
+    0
+}
+
+unsafe fn syscall_boottime(buf_ptr: u64, buf_len: u64) -> u64 {
+    let report = crate::bench::report();
+    let bytes = report.as_bytes();
+    let count = (buf_len as usize).min(bytes.len());
+    let buf = buf_ptr as *mut u8;
+    core::ptr::copy_nonoverlapping(bytes.as_ptr(), buf, count);
+    count as u64
 }

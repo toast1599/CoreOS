@@ -6,7 +6,6 @@
 ///   - Vector 33 (IRQ 1): PS/2 keyboard
 ///
 /// PIC remapping is handled by `hw::pic::init()`.
-use crate::default_exception;
 use crate::gdt::SEG_KCODE;
 use core::mem::size_of;
 
@@ -143,6 +142,26 @@ keyboard_interrupt:
     pop rbx
     pop rax
     iretq
+// --- Exceptions -------------------------------------------------------
+.global exc0_stub
+.global exc6_stub
+.global exc13_stub
+.global exc14_stub
+.extern default_exception
+
+exc0_stub:  push 0; push 0;  jmp exc_common
+exc6_stub:  push 0; push 6;  jmp exc_common
+exc13_stub:         push 13; jmp exc_common
+exc14_stub:         push 14; jmp exc_common
+
+exc_common:
+    cli
+    mov rdi, [rsp]      // first arg: vector
+    // stack currently: [vector], [error_code], [rip], [cs], [rflags]...
+    // default_exception(u64 vector)
+    call default_exception
+    add rsp, 16         // clean up vector and error code
+    iretq
 "#
 );
 
@@ -155,6 +174,10 @@ static mut IDT: [IdtEntry; 256] = [IdtEntry::missing(); 256];
 extern "C" {
     fn keyboard_interrupt();
     fn pit_interrupt();
+    fn exc0_stub();
+    fn exc6_stub();
+    fn exc13_stub();
+    fn exc14_stub();
 }
 
 // ---------------------------------------------------------------------------
@@ -162,10 +185,13 @@ extern "C" {
 // ---------------------------------------------------------------------------
 
 pub unsafe fn init() {
-    // Install default exception stubs for vectors 0–29
-    for i in 0..30 {
-        IDT[i].set_handler(default_exception);
-    }
+    // Vectors 0–31 are reserved for exceptions.
+    // We install specific stubs for the ones we care about,
+    // and let others fall through to a generic halt if triggered.
+    IDT[0].set_handler(exc0_stub);   // Divide by Zero
+    IDT[6].set_handler(exc6_stub);   // Invalid Opcode
+    IDT[13].set_handler(exc13_stub); // GPF
+    IDT[14].set_handler(exc14_stub); // Page Fault
 
     // Hardware IRQs (after PIC remapping: IRQ0 → 32, IRQ1 → 33)
     IDT[32].set_handler(pit_interrupt);

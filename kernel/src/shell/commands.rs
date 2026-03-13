@@ -206,7 +206,7 @@ fn cmd_sleep(buf: &[char; BUF_LEN]) -> ShellOutput {
             n = n * 10 + (c as u64 - '0' as u64);
         }
     }
-    crate::hw::pit::sleep(n * 100);
+    crate::hw::pit::sleep_yield(n * 100);
     ShellOutput::None
 }
 
@@ -237,7 +237,9 @@ fn cmd_exec(buf: &[char; BUF_LEN], ctx: &ShellContext) -> ShellOutput {
         None => return ShellOutput::Print("Error: file not found.".into()),
     };
 
-    let pid = unsafe { crate::exec::exec_as_task(elf_bytes.as_slice()) };
+    crate::vga::set_userspace_cursor(20, *ctx.current_y + 16 * (*ctx.global_scale));
+
+    let (pid, _slot) = unsafe { crate::exec::exec_as_task(elf_bytes.as_slice()) };
     if pid == 0 {
         ShellOutput::Print("exec failed.".into())
     } else {
@@ -253,4 +255,3 @@ fn cmd_boottime() -> ShellOutput {
             .collect(),
     )
 }
-

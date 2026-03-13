@@ -43,6 +43,12 @@ impl KeyBuffer {
             Some(c)
         }
     }
+    pub fn flush(&self) {
+        unsafe {
+            *self.head.get() = 0;
+            *self.tail.get() = 0;
+        }
+    }
 }
 
 pub static KEYBUF: KeyBuffer = KeyBuffer::new();

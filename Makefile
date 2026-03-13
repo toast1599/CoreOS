@@ -68,19 +68,19 @@ $(LOADER_EFI): dirs $(LOADER_SRC)
 # Build Disk Image
 # =========================
 
-$(IMAGE): $(KERNEL_BIN) $(LOADER_EFI) user/test.elf
+$(IMAGE): $(KERNEL_BIN) $(LOADER_EFI) user/shell.elf
 	dd if=/dev/zero of=$(IMAGE) bs=1M count=64
 	mkfs.fat -F 32 $(IMAGE)
 	mmd -i $(IMAGE) ::/EFI
 	mmd -i $(IMAGE) ::/EFI/BOOT
 	mcopy -i $(IMAGE) $(LOADER_EFI) ::/EFI/BOOT/
 	mcopy -i $(IMAGE) $(KERNEL_BIN) ::/
-	mcopy -i $(IMAGE) user/test.elf  ::/
+	mcopy -i $(IMAGE) user/shell.elf ::/test.elf
 	mcopy -i $(IMAGE) assets/font.psfu ::/
 
-user/test.elf:
+user/shell.elf: dirs
 	$(MAKE) -C user
-	
+		
 # =========================
 # Run in QEMU
 # =========================
@@ -128,3 +128,4 @@ copy: context
 clean:
 	rm -rf $(BUILD_DIR)
 	cd kernel && cargo clean
+	$(MAKE) -C user clean

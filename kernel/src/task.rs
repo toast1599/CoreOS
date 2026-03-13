@@ -1,5 +1,5 @@
 /// Task management — kernel stacks + round-robin scheduler support.
-use crate::pmm::{alloc_frame, PAGE_SIZE};
+use crate::pmm::{alloc_frame, alloc_frames, PAGE_SIZE};
 
 #[repr(C)]
 pub struct Context {
@@ -41,13 +41,14 @@ pub unsafe fn add_task(entry: fn()) -> bool {
         }
     };
 
-    let stack_base = alloc_frame();
+    let stack_pages = 4;
+    let stack_base = alloc_frames(stack_pages);
     if stack_base == 0 {
         crate::dbg_log!("TASK", "OOM allocating stack");
         return false;
     }
 
-    let stack_top = stack_base + PAGE_SIZE;
+    let stack_top = stack_base + stack_pages * PAGE_SIZE;
     let mut sp = stack_top;
 
     sp -= 8;
@@ -85,6 +86,10 @@ pub unsafe fn add_task(entry: fn()) -> bool {
 
 pub unsafe fn current_idx() -> usize {
     CURRENT
+}
+
+pub unsafe fn current_task_slot() -> Option<usize> {
+    Some(CURRENT)
 }
 
 pub unsafe fn next_task_switch() -> Option<(*mut usize, usize)> {
@@ -135,6 +140,13 @@ pub unsafe fn next_task_switch() -> Option<(*mut usize, usize)> {
 
     TASKS[next_idx].as_mut().unwrap().state = TaskState::Running;
     CURRENT = next_idx;
+
+    // Update TSS.rsp0 so the CPU knows where the kernel stack is for the next
+    // time this task enters the kernel from ring 3 (interrupt or syscall).
+    let next_stack_top = TASKS[next_idx].as_ref().unwrap().stack_base + 4 * PAGE_SIZE;
+    crate::gdt::TSS.rsp0 = next_stack_top as u64;
+    crate::gdt::TSS_RSP0 = next_stack_top as u64;
+
     Some((old_rsp_ptr, TASKS[next_idx].as_ref().unwrap().rsp))
 }
 pub unsafe fn init_main_task(stack_base: usize) {
@@ -161,7 +173,8 @@ pub unsafe fn spawn_user_task(entry: u64, stack_top: u64) -> Option<usize> {
     };
 
     // Allocate a kernel stack for this task's context switch frame.
-    let stack_base = alloc_frame();
+    let stack_pages = 4;
+    let stack_base = alloc_frames(stack_pages);
     if stack_base == 0 {
         crate::dbg_log!("TASK", "OOM allocating user task kernel stack");
         return None;
@@ -171,7 +184,7 @@ pub unsafe fn spawn_user_task(entry: u64, stack_top: u64) -> Option<usize> {
     // The task will be switched to via switch_to, which expects
     // callee-saved regs on the stack followed by a return address.
     // We point the return address at a trampoline that does iretq.
-    let kstack_top = stack_base + PAGE_SIZE;
+    let kstack_top = stack_base + stack_pages * PAGE_SIZE;
     let mut sp = kstack_top;
 
     // Push entry point and stack top for the trampoline to read.

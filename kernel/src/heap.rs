@@ -95,44 +95,37 @@ unsafe impl GlobalAlloc for SlabAllocator {
             .max(core::mem::size_of::<usize>());
 
         if let Some(ci) = class_for(size) {
-            let slab = SLABS[ci]
-                .iter_mut()
-                .find(|h| !h.is_empty_slot() && h.free_count > 0);
-            let slab = match slab {
-                Some(s) => s,
-                None => match new_slab(ci) {
+            core::arch::asm!("cli", options(nomem, nostack));
+            let res = (|| {
+                let slab = SLABS[ci]
+                    .iter_mut()
+                    .find(|h| !h.is_empty_slot() && h.free_count > 0);
+                let slab = match slab {
                     Some(s) => s,
-                    None => {
-                        crate::dbg_log!("SLAB", "OOM for class {}", ci);
-                        return null_mut();
-                    }
-                },
-            };
+                    None => match new_slab(ci) {
+                        Some(s) => s,
+                        None => {
+                            crate::dbg_log!("SLAB", "OOM for class {}", ci);
+                            return null_mut();
+                        }
+                    },
+                };
 
-            let slot = slab.free_head;
-            slab.free_head = *(slot as *const usize);
-            slab.free_count -= 1;
-            core::ptr::write_bytes(slot as *mut u8, 0, SIZE_CLASSES[ci]);
-            slot as *mut u8
+                let slot = slab.free_head;
+                slab.free_head = *(slot as *const usize);
+                slab.free_count -= 1;
+                core::ptr::write_bytes(slot as *mut u8, 0, SIZE_CLASSES[ci]);
+                slot as *mut u8
+            })();
+            core::arch::asm!("sti", options(nomem, nostack));
+            res
         } else {
             let pages_needed = (size + PAGE_SIZE - 1) / PAGE_SIZE;
-            if pages_needed == 1 {
-                let page = alloc_frame();
-                if page == 0 {
-                    return null_mut();
-                }
-                return page as *mut u8;
-            }
-            let first = alloc_frame();
+            core::arch::asm!("cli", options(nomem, nostack));
+            let first = crate::pmm::alloc_frames(pages_needed);
+            core::arch::asm!("sti", options(nomem, nostack));
             if first == 0 {
                 return null_mut();
-            }
-            for _ in 1..pages_needed {
-                let next = alloc_frame();
-                if next == 0 {
-                    return null_mut();
-                }
-                let _ = next;
             }
             first as *mut u8
         }
@@ -149,6 +142,7 @@ unsafe impl GlobalAlloc for SlabAllocator {
 
         if let Some(ci) = class_for(size) {
             let addr = ptr as usize;
+            core::arch::asm!("cli", options(nomem, nostack));
             if let Some(slab) = SLABS[ci]
                 .iter_mut()
                 .find(|h| !h.is_empty_slot() && addr >= h.page && addr < h.page + PAGE_SIZE)
@@ -164,11 +158,14 @@ unsafe impl GlobalAlloc for SlabAllocator {
             } else {
                 crate::dbg_log!("SLAB", "dealloc: ptr {:#x} not found in slabs!", addr);
             }
+            core::arch::asm!("sti", options(nomem, nostack));
         } else {
             let pages_needed = (size + PAGE_SIZE - 1) / PAGE_SIZE;
+            core::arch::asm!("cli", options(nomem, nostack));
             for i in 0..pages_needed {
                 free_frame(ptr as usize + i * PAGE_SIZE);
             }
+            core::arch::asm!("sti", options(nomem, nostack));
         }
     }
 }

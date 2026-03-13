@@ -1,21 +1,38 @@
-ASM    = nasm
-LD     = ld
+CC      = clang
+ASM     = nasm
+LD      = ld
 
-ASMFLAGS = -f elf64
-LDFLAGS  = -static \
-           -m elf_x86_64 \
-           --entry _start \
-           -Ttext 0x400000 \
-           --oformat elf64-x86-64
+# Target: bare-metal x86_64, no standard library
+CFLAGS  = -target x86_64-unknown-none \
+          -ffreestanding \
+          -fno-stack-protector \
+          -fno-builtin \
+          -O2 \
+          -I libcshim \
+          -mno-red-zone
 
-OUT = test.elf
+LDFLAGS = -T shell.ld \
+          -nostdlib \
+          --no-dynamic-linker \
+          -static
 
-all: $(OUT)
+OBJS    = start.o shell.o libcshim/libcshim.o
 
-$(OUT): test.asm
-	$(ASM) $(ASMFLAGS) test.asm -o test.o
-	$(LD)  $(LDFLAGS)  test.o  -o $(OUT)
-	rm test.o
+.PHONY: all clean
+
+all: shell.elf
+
+start.o: start.asm
+	$(ASM) -f elf64 start.asm -o start.o
+
+shell.o: shell.c libcshim/libcshim.h
+	$(CC) $(CFLAGS) -c shell.c -o shell.o
+
+libcshim/libcshim.o: libcshim/libcshim.c libcshim/libcshim.h
+	$(CC) $(CFLAGS) -c libcshim/libcshim.c -o libcshim/libcshim.o
+
+shell.elf: $(OBJS) shell.ld
+	$(LD) $(LDFLAGS) -o shell.elf $(OBJS)
 
 clean:
-	rm -f $(OUT) test.o
+	rm -f *.o *.elf
