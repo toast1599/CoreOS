@@ -4,7 +4,7 @@ use crate::drivers::serial;
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     unsafe {
-        serial::write_str("[KERNEL PANIC] ");
+        serial::write_str("[PERNEL KANIC] ");
     }
     if let Some(msg) = info.message().as_str() {
         unsafe {

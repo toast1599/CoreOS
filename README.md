@@ -1,6 +1,6 @@
 # CoreOS
 
-CoreOS is a hobby **AMD64 monolithic operating system** written in Rust with a small C-based UEFI bootloader.
+CoreOS is a new **AMD64 monolithic operating system** written in Rust with a small C-based UEFI bootloader.
 
 The project focuses on exploring low-level OS architecture, including memory management, process scheduling, and userspace execution.
 
