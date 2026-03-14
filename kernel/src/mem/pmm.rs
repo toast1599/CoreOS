@@ -25,7 +25,9 @@ unsafe fn is_free(f: usize) -> bool {
 }
 
 pub unsafe fn init(boot_info: *const CoreOS_BootInfo, kernel_end_phys: usize) {
+    crate::serial_fmt!("pmm::init begin\n");
     let mmap_count = core::ptr::read_unaligned(addr_of!((*boot_info).mmap_count)) as usize;
+    crate::serial_fmt!("pmm::init mmap_count={}\n", mmap_count);
 
     for i in 0..mmap_count {
         let entry = core::ptr::read_unaligned(
@@ -59,6 +61,7 @@ pub unsafe fn init(boot_info: *const CoreOS_BootInfo, kernel_end_phys: usize) {
             }
         }
     }
+    crate::serial_fmt!("pmm::init mmap parsed\n");
 
     let kernel_start_frame = 0x100000 / PAGE_SIZE;
     let kernel_end_frame = (kernel_end_phys + PAGE_SIZE - 1) / PAGE_SIZE;
@@ -70,6 +73,7 @@ pub unsafe fn init(boot_info: *const CoreOS_BootInfo, kernel_end_phys: usize) {
     }
 
     set_used(0); // null page always used
+    crate::serial_fmt!("pmm::init kernel frames reserved\n");
 
     crate::dbg_log!(
         "PMM",
@@ -87,7 +91,7 @@ pub unsafe fn alloc_frame() -> usize {
                 FREE_FRAMES -= 1;
             }
             let addr = f * PAGE_SIZE;
-            core::ptr::write_bytes(addr as *mut u8, 0, PAGE_SIZE);
+            core::ptr::write_bytes(crate::arch::amd64::paging::p2v(addr) as *mut u8, 0, PAGE_SIZE);
             return addr;
         }
     }
@@ -120,7 +124,7 @@ pub unsafe fn alloc_frames(count: usize) -> usize {
                     FREE_FRAMES -= count;
                 }
                 let addr = start_frame * PAGE_SIZE;
-                core::ptr::write_bytes(addr as *mut u8, 0, count * PAGE_SIZE);
+                core::ptr::write_bytes(crate::arch::amd64::paging::p2v(addr) as *mut u8, 0, count * PAGE_SIZE);
                 return addr;
             }
         } else {

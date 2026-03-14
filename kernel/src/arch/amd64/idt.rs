@@ -6,7 +6,7 @@
 ///   - Vector 33 (IRQ 1): PS/2 keyboard
 ///
 /// PIC remapping is handled by `hw::pic::init()`.
-use crate::gdt::SEG_KCODE;
+use crate::arch::gdt::SEG_KCODE;
 use core::mem::size_of;
 
 // ---------------------------------------------------------------------------
@@ -149,18 +149,51 @@ keyboard_interrupt:
 .global exc14_stub
 .extern default_exception
 
-exc0_stub:  push 0; push 0;  jmp exc_common
-exc6_stub:  push 0; push 6;  jmp exc_common
-exc13_stub:         push 13; jmp exc_common
-exc14_stub:         push 14; jmp exc_common
+exc0_stub:  push 0; push 0; push 0;  jmp exc_common
+exc6_stub:  push 0; push 0; push 6;  jmp exc_common
+exc13_stub: push 0;         push 13; jmp exc_common
+exc14_stub: push 0;         push 14; jmp exc_common
 
 exc_common:
     cli
-    mov rdi, [rsp]      // first arg: vector
-    // stack currently: [vector], [error_code], [rip], [cs], [rflags]...
-    // default_exception(u64 vector)
+    // Current stack: [vector], [error_code], [padding], [rip], [cs], [rflags], [rsp], [ss]
+    // Save all general purpose registers
+    push rax
+    push rbx
+    push rcx
+    push rdx
+    push rsi
+    push rdi
+    push rbp
+    push r8
+    push r9
+    push r10
+    push r11
+    push r12
+    push r13
+    push r14
+    push r15
+
+    mov rdi, rsp        // Pass the pointer to the saved frame as first arg
     call default_exception
-    add rsp, 16         // clean up vector and error code
+
+    // We shouldn't return from default_exception, but if we do...
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rbp
+    pop rdi
+    pop rsi
+    pop rdx
+    pop rcx
+    pop rbx
+    pop rax
+    add rsp, 24         // Clean up padding, vector, and error code
     iretq
 "#
 );

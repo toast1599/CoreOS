@@ -1,4 +1,4 @@
-use crate::pmm::{alloc_frame, free_frame, PAGE_SIZE};
+use super::pmm::{alloc_frame, free_frame, PAGE_SIZE};
 /// Slab Allocator
 ///
 /// Size classes (bytes): 16, 32, 64, 128, 256, 512, 1024, 2048.
@@ -64,9 +64,9 @@ unsafe fn new_slab(class_idx: usize) -> Option<&'static mut SlabHeader> {
     let capacity = PAGE_SIZE / slot_size;
     let mut prev: usize = 0;
     for i in (0..capacity).rev() {
-        let slot = page + i * slot_size;
-        (slot as *mut usize).write(prev);
-        prev = slot;
+        let slot_virt = crate::arch::amd64::paging::p2v(page + i * slot_size);
+        (slot_virt as *mut usize).write(prev);
+        prev = slot_virt;
     }
 
     header.page = page;
@@ -122,12 +122,12 @@ unsafe impl GlobalAlloc for SlabAllocator {
         } else {
             let pages_needed = (size + PAGE_SIZE - 1) / PAGE_SIZE;
             core::arch::asm!("cli", options(nomem, nostack));
-            let first = crate::pmm::alloc_frames(pages_needed);
+            let first = super::pmm::alloc_frames(pages_needed);
             core::arch::asm!("sti", options(nomem, nostack));
             if first == 0 {
                 return null_mut();
             }
-            first as *mut u8
+            crate::arch::amd64::paging::p2v(first) as *mut u8
         }
     }
 
@@ -141,14 +141,15 @@ unsafe impl GlobalAlloc for SlabAllocator {
             .max(core::mem::size_of::<usize>());
 
         if let Some(ci) = class_for(size) {
-            let addr = ptr as usize;
+            let addr_virt = ptr as usize;
+            let addr_phys = crate::arch::amd64::paging::v2p(addr_virt);
             core::arch::asm!("cli", options(nomem, nostack));
             if let Some(slab) = SLABS[ci]
                 .iter_mut()
-                .find(|h| !h.is_empty_slot() && addr >= h.page && addr < h.page + PAGE_SIZE)
+                .find(|h| !h.is_empty_slot() && addr_phys >= h.page && addr_phys < h.page + PAGE_SIZE)
             {
-                (addr as *mut usize).write(slab.free_head);
-                slab.free_head = addr;
+                (addr_virt as *mut usize).write(slab.free_head);
+                slab.free_head = addr_virt;
                 slab.free_count += 1;
                 if slab.free_count == slab.capacity {
                     crate::dbg_log!("SLAB", "returning empty slab page {:#x} to PMM", slab.page);
@@ -156,14 +157,15 @@ unsafe impl GlobalAlloc for SlabAllocator {
                     *slab = SlabHeader::empty();
                 }
             } else {
-                crate::dbg_log!("SLAB", "dealloc: ptr {:#x} not found in slabs!", addr);
+                crate::dbg_log!("SLAB", "dealloc: ptr {:#x} not found in slabs!", addr_virt);
             }
             core::arch::asm!("sti", options(nomem, nostack));
         } else {
             let pages_needed = (size + PAGE_SIZE - 1) / PAGE_SIZE;
+            let addr_phys = crate::arch::amd64::paging::v2p(ptr as usize);
             core::arch::asm!("cli", options(nomem, nostack));
             for i in 0..pages_needed {
-                free_frame(ptr as usize + i * PAGE_SIZE);
+                free_frame(addr_phys + i * PAGE_SIZE);
             }
             core::arch::asm!("sti", options(nomem, nostack));
         }

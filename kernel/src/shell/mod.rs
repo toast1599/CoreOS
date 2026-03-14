@@ -7,6 +7,7 @@
 /// `execute()` parses the current buffer and dispatches to the command
 /// handlers in `shell::commands`.
 pub mod commands;
+pub mod ui;
 
 // ---------------------------------------------------------------------------
 // Input buffer
@@ -52,14 +53,14 @@ impl Shell {
         // Log the command to serial
         unsafe {
             core::arch::asm!("cli", options(nostack, nomem));
-            crate::serial::write_str("[SHELL] cmd: [");
+            crate::drivers::serial::write_str("[SHELL] cmd: [");
             for i in 0..self.cursor {
                 let c = self.buffer[i];
                 if c != '\0' {
-                    crate::serial::write_byte(c as u8);
+                    crate::drivers::serial::write_byte(c as u8);
                 }
             }
-            crate::serial::write_str("]\n");
+            crate::drivers::serial::write_str("]\n");
             core::arch::asm!("sti", options(nostack, nomem));
         }
 

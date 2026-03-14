@@ -1,5 +1,5 @@
 /// Task management — kernel stacks + round-robin scheduler support.
-use crate::pmm::{alloc_frames, PAGE_SIZE};
+use crate::mem::pmm::{alloc_frames, PAGE_SIZE};
 
 #[repr(C)]
 pub struct Context {
@@ -146,8 +146,8 @@ pub unsafe fn next_task_switch() -> Option<(*mut usize, usize)> {
     // Update TSS.rsp0 so the CPU knows where the kernel stack is for the next
     // time this task enters the kernel from ring 3 (interrupt or syscall).
     let next_stack_top = TASKS[next_idx].as_ref().unwrap().stack_base + 4 * PAGE_SIZE;
-    crate::gdt::TSS.rsp0 = next_stack_top as u64;
-    crate::gdt::TSS_RSP0 = next_stack_top as u64;
+    crate::arch::gdt::TSS.rsp0 = next_stack_top as u64;
+    crate::arch::gdt::TSS_RSP0 = next_stack_top as u64;
 
     Some((old_rsp_ptr, TASKS[next_idx].as_ref().unwrap().rsp))
 }

@@ -1,7 +1,8 @@
-/// process.rs — Single-process table.
-///
-/// Tracks the currently running userspace process.
-/// One process at a time for now — extensible to a full table later.
+pub mod task;
+pub mod scheduler;
+pub mod exec;
+pub mod elf;
+
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 // ---------------------------------------------------------------------------
@@ -79,7 +80,7 @@ pub unsafe fn spawn(task_slot: usize) -> usize {
 }
 
 pub unsafe fn current_brk() -> usize {
-    if let Some(slot) = crate::task::current_task_slot() {
+    if let Some(slot) = task::current_task_slot() {
         if let Some(ref p) = PROCESSES[slot] {
             return p.program_break;
         }
@@ -88,7 +89,7 @@ pub unsafe fn current_brk() -> usize {
 }
 
 pub unsafe fn set_brk(new_brk: usize) {
-    if let Some(slot) = crate::task::current_task_slot() {
+    if let Some(slot) = task::current_task_slot() {
         if let Some(ref mut p) = PROCESSES[slot] {
             p.program_break = new_brk;
         }
@@ -97,7 +98,7 @@ pub unsafe fn set_brk(new_brk: usize) {
 
 /// Called by syscall 60 (exit) to mark the current process as a zombie.
 pub unsafe fn exit(code: i64) {
-    if let Some(slot) = crate::task::current_task_slot() {
+    if let Some(slot) = task::current_task_slot() {
         if let Some(ref mut p) = PROCESSES[slot] {
             crate::dbg_log!(
                 "PROCESS",
@@ -140,7 +141,7 @@ pub unsafe fn reap_slot(slot: usize) -> Option<i64> {
 
 /// Allocate a new fd for the current process.
 pub unsafe fn alloc_fd(file_idx: usize) -> i64 {
-    let slot = match crate::task::current_task_slot() {
+    let slot = match task::current_task_slot() {
         Some(s) => s,
         None => return -1,
     };
@@ -165,7 +166,7 @@ pub unsafe fn get_fd(fd: usize) -> Option<&'static OpenFile> {
     if fd < 3 {
         return None;
     }
-    let slot = crate::task::current_task_slot()?;
+    let slot = task::current_task_slot()?;
     let p = PROCESSES[slot].as_ref()?;
     let idx = fd - 3;
     if idx >= MAX_FDS {
@@ -178,7 +179,7 @@ pub unsafe fn get_fd_mut(fd: usize) -> Option<&'static mut OpenFile> {
     if fd < 3 {
         return None;
     }
-    let slot = crate::task::current_task_slot()?;
+    let slot = task::current_task_slot()?;
     let p = PROCESSES[slot].as_mut()?;
     let idx = fd - 3;
     if idx >= MAX_FDS {
@@ -191,7 +192,7 @@ pub unsafe fn close_fd(fd: usize) -> bool {
     if fd < 3 {
         return false;
     }
-    let slot = match crate::task::current_task_slot() {
+    let slot = match task::current_task_slot() {
         Some(s) => s,
         None => return false,
     };

@@ -8,37 +8,25 @@
 
 extern crate alloc;
 
-// --- Core Architecture & Hardware ---
+// --- Architecture ---
+mod arch;
 mod boot;
-mod gdt;
 mod hw; // Centralized hardware (PIC, PIT, PS2, RTC, etc.)
-mod idt;
-mod paging;
-mod pmm;
-mod serial;
+mod mem;
+mod drivers;
 mod syscall;
-mod vga;
 
 // --- Memory & Execution ---
-mod elf;
-mod exec;
-mod heap;
-mod process;
-mod scheduler;
-mod task;
+mod proc;
 
 // --- Filesystem & UI ---
 mod bench;
 mod debug;
 mod fs;
 mod shell;
+mod panic;
 
-//
-
-use crate::heap::SlabAllocator;
-use core::fmt::Write;
-use core::panic::PanicInfo;
-use vga::Console;
+use crate::mem::heap::SlabAllocator;
 
 // ---------------------------------------------------------------------------
 // Global allocator
@@ -55,23 +43,6 @@ fn alloc_error(layout: core::alloc::Layout) -> ! {
         layout.align()
     );
     loop {}
-}
-
-// ---------------------------------------------------------------------------
-// Interrupt handlers (called from IDT stubs in idt.rs)
-// ---------------------------------------------------------------------------
-
-#[no_mangle]
-pub extern "C" fn keyboard_handler() {
-    unsafe {
-        hw::pic::eoi(1);
-        let scancode = hw::ps2::read_data();
-        crate::serial_fmt!("[KBD] scancode={:#x}\n", scancode);
-        let c = hw::ps2::scancode_to_char(scancode);
-        if c != '\0' {
-            hw::kbd_buffer::KEYBUF.push(c);
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -92,19 +63,50 @@ fn demo_task() {
 
 #[export_name = "_start"]
 #[link_section = ".text._start"]
-pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> ! {
+pub unsafe extern "win64" fn _start(boot_info_phys: *const boot::CoreOS_BootInfo) -> ! {
     // -----------------------------------------------------------------------
-    // 0. Zero BSS
+    // -1. Zero BSS (Must happen first for serial_fmt! to work)
     // -----------------------------------------------------------------------
-    extern "C" {
-        static mut __bss_start: u8;
-        static mut __bss_end: u8;
+    {
+        extern "C" {
+            static mut __bss_start: u8;
+            static mut __bss_end: u8;
+        }
+        let bss_start = &raw mut __bss_start as *mut u8;
+        let bss_end = &raw mut __bss_end as *mut u8;
+        core::ptr::write_bytes(bss_start, 0, bss_end as usize - bss_start as usize);
     }
-    let bss_start = &raw mut __bss_start as *mut u8;
-    let bss_end = &raw mut __bss_end as *mut u8;
-    core::ptr::write_bytes(bss_start, 0, bss_end as usize - bss_start as usize);
 
-    serial::write_str("kernel start\n");
+    // -----------------------------------------------------------------------
+    // 1. Initial Serial & Memory
+    // -----------------------------------------------------------------------
+    drivers::serial::write_str("kernel start\n");
+    crate::serial_fmt!("boot_info_phys={:p}\n", boot_info_phys);
+
+    // -----------------------------------------------------------------------
+    // 0. High-Half Boot Info Conversion
+    // -----------------------------------------------------------------------
+    // The bootloader preserves the UEFI identity map, so we can use boot_info_phys directly first.
+    static mut BOOT_INFO_DATA: boot::CoreOS_BootInfo = boot::CoreOS_BootInfo {
+        fb_base: 0, fb_size: 0, width: 0, height: 0, pitch: 0,
+        mmap: [boot::MemMapEntry { physical_start: 0, num_pages: 0, mem_type: 0, _pad: 0 }; 256],
+        mmap_count: 0, _pad: 0,
+        user_elf_base: 0, user_elf_size: 0,
+        font_base: 0, font_size: 0,
+        tsc_bootloader_start: 0,
+    };
+    BOOT_INFO_DATA = core::ptr::read_unaligned(boot_info_phys);
+    
+    // Check if the original pointers are valid
+    BOOT_INFO_DATA.fb_base = arch::amd64::paging::p2v(BOOT_INFO_DATA.fb_base as usize) as u64;
+    if BOOT_INFO_DATA.font_base != 0 {
+        BOOT_INFO_DATA.font_base = arch::amd64::paging::p2v(BOOT_INFO_DATA.font_base as usize) as u64;
+    }
+    if BOOT_INFO_DATA.user_elf_base != 0 {
+        BOOT_INFO_DATA.user_elf_base = arch::amd64::paging::p2v(BOOT_INFO_DATA.user_elf_base as usize) as u64;
+    }
+    let boot_info = core::ptr::addr_of!(BOOT_INFO_DATA) as *const boot::CoreOS_BootInfo;
+
     bench::stamp(bench::Phase::KernelEntry);
     let bl_tsc = core::ptr::read_unaligned(core::ptr::addr_of!((*boot_info).tsc_bootloader_start));
     bench::set_bootloader_tsc(bl_tsc);
@@ -120,14 +122,15 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
         stack = sym __stack_top,
         options(nostack, nomem)
     );
-    serial::write_str("stack ok\n");
+    drivers::serial::write_str("stack ok\n");
 
     // -----------------------------------------------------------------------
     // 2. Physical memory manager
-    // -----------------------------------------------------------------------
-    let kernel_end = &raw const __stack_top as usize + 0x200000; // stack top + 2 MB margin
-    pmm::init(boot_info, kernel_end);
-    serial::write_str("pmm ok\n");
+    // -----------------------------------------------------------------------    // 2. Physical memory manager
+    let kernel_end = &raw const __stack_top as usize - 0xFFFFFFFF80000000 + 0x200000;
+    drivers::serial::write_str("calling pmm::init\n");
+    mem::pmm::init(boot_info, kernel_end);
+    drivers::serial::write_str("pmm ok\n");
     bench::stamp(bench::Phase::PmmDone);
 
     // -----------------------------------------------------------------------
@@ -144,7 +147,7 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
         let src = core::slice::from_raw_parts(font_base as *const u8, font_size);
         FONT_BUF[..font_size].copy_from_slice(src);
         FONT_LEN = font_size;
-        serial::write_str("font loaded into static buffer\n");
+        drivers::serial::write_str("font loaded into static buffer\n");
     }
 
     let elf_base = (*boot_info).user_elf_base;
@@ -153,14 +156,14 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
         let src = core::slice::from_raw_parts(elf_base as *const u8, elf_size);
         ELF_BUF[..elf_size].copy_from_slice(src);
         ELF_LEN = elf_size;
-        serial::write_str("elf bytes saved to static buffer\n");
+        drivers::serial::write_str("elf bytes saved to static buffer\n");
     }
 
     // -----------------------------------------------------------------------
     // 3. Paging (identity map first 4 GB + framebuffer)
     // -----------------------------------------------------------------------
-    paging::init(boot_info);
-    serial::write_str("paging ok\n");
+    arch::paging::init(boot_info);
+    drivers::serial::write_str("paging ok\n");
     bench::stamp(bench::Phase::PagingDone);
 
     // Point BootInfo font fields at our static buffer now that paging is up
@@ -202,34 +205,34 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
         }
     }
 
-    vga::init_global(boot_info);
+    drivers::vga::init_global(boot_info);
 
-    gdt::init();
-    serial::write_str("gdt ok\n");
+    arch::gdt::init();
+    drivers::serial::write_str("gdt ok\n");
     bench::stamp(bench::Phase::GdtDone);
 
     extern "C" {
         static __stack_bottom: u8;
     }
-    gdt::TSS.rsp0 = &raw const __stack_top as u64;
-    gdt::TSS_RSP0 = &raw const __stack_top as u64;
+    arch::gdt::TSS.rsp0 = &raw const __stack_top as u64;
+    arch::gdt::TSS_RSP0 = &raw const __stack_top as u64;
 
-    idt::init();
-    serial::write_str("idt ok\n");
+    arch::idt::init();
+    drivers::serial::write_str("idt ok\n");
     bench::stamp(bench::Phase::IdtDone);
 
     syscall::init();
-    serial::write_str("syscall gate ok\n");
+    drivers::serial::write_str("syscall gate ok\n");
     bench::stamp(bench::Phase::SyscallDone);
 
     hw::pit::init();
-    serial::write_str("pit ok\n");
+    drivers::serial::write_str("pit ok\n");
     bench::stamp(bench::Phase::PitDone);
 
-    task::init_main_task(&raw const __stack_bottom as usize);
+    proc::task::init_main_task(&raw const __stack_bottom as usize);
 
     core::arch::asm!("sti");
-    serial::write_str("sti ok\n");
+    drivers::serial::write_str("sti ok\n");
 
     // -----------------------------------------------------------------------
     // 5. Heap smoke-test
@@ -247,168 +250,12 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
     // -----------------------------------------------------------------------
     // 6. Register demo background task
     // -----------------------------------------------------------------------
-    task::add_task(demo_task);
-    serial::write_str("task added\n");
+    proc::task::add_task(demo_task);
+    drivers::serial::write_str("task added\n");
     bench::stamp(bench::Phase::RamfsDone);
+
     // -----------------------------------------------------------------------
     // 7. Shell UI
     // -----------------------------------------------------------------------
-    run_shell(boot_info);
-}
-
-// ---------------------------------------------------------------------------
-// Shell UI loop (extracted from _start for readability)
-// ---------------------------------------------------------------------------
-
-unsafe fn run_shell(boot_info: *const boot::CoreOS_BootInfo) -> ! {
-    let width = (*boot_info).width as usize;
-    let height = (*boot_info).height as usize;
-
-    // Clear screen
-    vga::draw_rect(0, 0, width, height, vga::BG_COLOR, boot_info);
-
-    // Header
-    let mut header = Console {
-        x: 20,
-        y: 20,
-        color: vga::CLOCK_COLOR,
-        scale: 2,
-        boot_info,
-    };
-    let _ = write!(header, "CoreOS Shell v0.01");
-    vga::draw_rect(20, 60, 550, 4, vga::CLOCK_COLOR, boot_info);
-
-    serial::write_str("Starting default userspace shell...\n");
-
-    loop {
-        let name: &[char] = &['t', 'e', 's', 't'];
-        let mut elf_data = None;
-
-        if let Some(ref fs) = fs::FILESYSTEM {
-            if let Some(f) = fs.find(name) {
-                elf_data = Some(f.data.clone());
-            }
-        }
-
-        if let Some(data) = elf_data {
-            let (pid, slot) = crate::exec::exec_as_task(&data);
-            if pid > 0 {
-                let mut last_s = 255u8;
-                while process::is_running_in_slot(slot) {
-                    let (h, m, s) = hw::rtc::get_time();
-                    if s != last_s {
-                        let clock_x = width - 150;
-                        vga::draw_rect(clock_x, 20, 130, 32, vga::BG_COLOR, boot_info);
-                        draw_clock(boot_info, clock_x, 20, h, m, s);
-                        last_s = s;
-                    }
-                    core::arch::asm!("hlt");
-                }
-                if let Some(code) = process::reap_slot(slot) {
-                    serial_fmt!(
-                        "Userspace shell (pid {}) exited with code {}. Restarting...\n",
-                        pid,
-                        code
-                    );
-                }
-            } else {
-                serial::write_str("Failed to spawn userspace shell. Hitting hlt loop.\n");
-                loop {
-                    core::arch::asm!("hlt");
-                }
-            }
-        } else {
-            serial::write_str("test.elf not found in RamFS. Hitting hlt loop.\n");
-            loop {
-                core::arch::asm!("hlt");
-            }
-        }
-    }
-}
-
-/// HH:MM:SS draw helper for the kernel's top bar.
-unsafe fn draw_clock(
-    boot_info: *const boot::CoreOS_BootInfo,
-    x: usize,
-    y: usize,
-    h: u8,
-    m: u8,
-    s: u8,
-) {
-    let mut con = Console {
-        x,
-        y,
-        color: vga::CLOCK_COLOR,
-        scale: 2,
-        boot_info,
-    };
-
-    let write_two = |con: &mut Console, n: u8| {
-        let _ = write!(con, "{:02}", n);
-    };
-
-    write_two(&mut con, h);
-    let _ = write!(con, ":");
-    write_two(&mut con, m);
-    let _ = write!(con, ":");
-    write_two(&mut con, s);
-}
-
-// ---------------------------------------------------------------------------
-// Default exception handler
-// ---------------------------------------------------------------------------
-
-#[no_mangle]
-pub extern "C" fn default_exception(vector: u64) {
-    unsafe {
-        core::arch::asm!("sti");
-        crate::serial_fmt!("[EXCEPTION] fault #{} in task — marking dead\n", vector);
-        // Mark process as exited with error code so kernel shell can reap it
-        crate::process::exit(vector as i64);
-        if let Some(slot) = crate::task::current_task_slot() {
-            crate::task::kill_task(slot);
-        }
-    }
-    loop {
-        unsafe {
-            core::arch::asm!("hlt");
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Panic handler
-// ---------------------------------------------------------------------------
-
-#[panic_handler]
-fn panic(info: &PanicInfo) -> ! {
-    unsafe {
-        serial::write_str("[PERNEL KANIC] ");
-    }
-    if let Some(msg) = info.message().as_str() {
-        unsafe {
-            serial::write_str(msg);
-        }
-    }
-    if let Some(loc) = info.location() {
-        crate::serial_fmt!(" @ {}:{}\n", loc.file(), loc.line());
-    } else {
-        unsafe {
-            serial::write_str("\n");
-        }
-    }
-    unsafe {
-        // Disable interrupts and shut down via QEMU magic port.
-        // On real hardware this falls through to the hlt loop safely.
-        core::arch::asm!("cli");
-        core::arch::asm!(
-            "out dx, ax",
-            in("dx") 0x604u16,
-            in("ax") 0x2000u16,
-            options(nostack, nomem)
-        );
-        loop {
-            core::arch::asm!("hlt");
-        }
-    }
+    shell::ui::run_shell(boot_info);
 }

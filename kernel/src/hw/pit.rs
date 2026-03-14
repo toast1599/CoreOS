@@ -3,7 +3,7 @@
 /// `TICKS` is the single authoritative tick counter for the whole kernel.
 /// `scheduler::tick()` is called from the interrupt handler here; the
 /// scheduler no longer maintains its own counter.
-use crate::scheduler;
+use crate::proc::scheduler;
 use core::sync::atomic::{AtomicU64, Ordering};
 
 /// Kernel tick counter. Incremented every PIT interrupt (100 Hz).

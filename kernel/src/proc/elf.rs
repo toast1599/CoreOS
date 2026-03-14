@@ -7,7 +7,7 @@
 /// and returns the entry point address.
 ///
 /// Does NOT set up page tables or drop to ring 3 — that is the caller's job.
-use crate::pmm::PAGE_SIZE;
+use crate::mem::pmm::PAGE_SIZE;
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -215,7 +215,7 @@ pub unsafe fn load(data: &[u8]) -> Result<u64, ElfError> {
             // In our identity-mapped setup, virt == phys for the first 4 GB.
             // We must mark these frames as used in the PMM so no future
             // allocator (heap, task stack, another ELF load) clobbers them.
-            crate::pmm::mark_frame_used(page);
+            crate::mem::pmm::mark_frame_used(page);
 
             // Zero the page so BSS and inter-segment gaps are clean.
             core::ptr::write_bytes(page as *mut u8, 0, PAGE_SIZE);

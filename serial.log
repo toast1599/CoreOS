@@ -1,0 +1,119 @@
+[2J[01;01H[=3h[2J[01;01H[2J[01;01H[8;056;240t0[2J[01;01H[2J[01;01H[=3h[2J[01;01H[2J[01;01H[8;042;160t0[2J[01;01HBdsDxe: loading Boot0002 "UEFI QEMU HARDDISK QM00001 " from PciRoot(0x0)/Pci(0x1,0x1)/Ata(Primary,Master,0x0)
+BdsDxe: starting Boot0002 "UEFI QEMU HARDDISK QM00001 " from PciRoot(0x0)/Pci(0x1,0x1)/Ata(Primary,Master,0x0)
+kernel start
+boot_info_phys=0x1e722000
+stack ok
+calling pmm::init
+pmm::init begin
+pmm::init mmap_count=123
+[PMM] map entry 0: type=7 start=0x0 pages=160
+[PMM] map entry 1: type=7 start=0x100000 pages=1792
+[PMM] map entry 3: type=7 start=0x808000 pages=3
+[PMM] map entry 5: type=7 start=0x80c000 pages=5
+[PMM] map entry 8: type=7 start=0x1780000 pages=107500
+[PMM] map entry 10: type=7 start=0x1bb8c000 pages=9429
+[PMM] map entry 13: type=7 start=0x1e701000 pages=30
+[PMM] map entry 16: type=7 start=0x1e72d000 pages=3
+[PMM] map entry 111: type=7 start=0x1fe00000 pages=110
+pmm::init mmap parsed
+pmm::init kernel frames reserved
+[PMM] init done: 117843 free frames (460 MB free)
+pmm ok
+font loaded into static buffer
+elf bytes saved to static buffer
+[PAGING] direct map & kernel map active (PML4 @ 0x1000)
+paging ok
+ELF_BUF addr=0xffffffff8018db88 magic at copy time: 7f 45 4c 46
+[SLAB] new slab class=0 slot_size=16 page=0x9000 capacity=256
+[SLAB] new slab class=4 slot_size=256 page=0xa000 capacity=16
+user ELF loaded: 16680 bytes, magic: 7f 45 4c 46
+[GDT] loaded (TSS base=0xffffffff80169368)
+gdt ok
+[IDT] loaded (256 entries)
+[PIC] remapped; master mask=0b11111100 slave mask=0b11111111
+idt ok
+[SYSCALL] gate installed (LSTAR=0xffffffff80104804)
+syscall gate ok
+pit ok
+[TASK] main task registered as task 0
+sti ok
+[SLAB] new slab class=1 slot_size=32 page=0x10000 capacity=128
+heap smoke-test: 42 1337
+[SLAB] returning empty slab page 0x10000 to PMM
+[TASK] created task 1 in slot 1 (stack=0x10000)
+task added
+Starting default userspace shell...
+elf::load magic: 7f 45 4c 46
+[ELF] entry=0x400000 phoff=0x40 phentsize=56 phnum=2
+[ELF] PT_LOAD vaddr=0x400000 filesz=0x2c21 memsz=0x2c30
+[ELF] segment loaded at vaddr=0x400000 first_bytes=[48, 83, e4, f0]
+[EXEC] ELF entry=0x400000
+[EXEC] user stack base=0x19000 top=0x28ff8
+[TASK] spawned user task 2 in slot 2 (kstack=0x2d000 entry=0x400000 ustack=0x28ff8)
+[PROCESS] spawned pid=1 at slot=2
+[EXEC] process pid=1 running in task slot=2
+[SCHED] cur=0 t0=1 t1=0 t2=0
+[SCHED] cur=1 t0=0 t1=1 t2=0
+CoreOS userspace shell
+type 'help' for commands
+
+> [SCHED] cur=2 t0=0 t1=0 t2=1
+[SCHED] cur=0 t0=1 t1=0 t2=0
+[SCHED] cur=1 t0=0 t1=1 t2=0
+[SCHED] cur=2 t0=0 t1=0 t2=1
+[SCHED] cur=0 t0=1 t1=0 t2=0
+[SCHED] cur=1 t0=0 t1=1 t2=0
+[SCHED] cur=2 t0=0 t1=0 t2=1
+[SCHED] cur=0 t0=1 t1=0 t2=0
+[SCHED] cur=1 t0=0 t1=1 t2=0
+[SCHED] cur=2 t0=0 t1=0 t2=1
+[SCHED] cur=0 t0=1 t1=0 t2=0
+[SCHED] cur=1 t0=0 t1=1 t2=0
+[SCHED] cur=2 t0=0 t1=0 t2=1
+[SCHED] cur=0 t0=1 t1=0 t2=0
+[SCHED] cur=1 t0=0 t1=1 t2=0
+[SCHED] cur=2 t0=0 t1=0 t2=1
+[SCHED] cur=0 t0=1 t1=0 t2=0
+[SCHED] cur=1 t0=0 t1=1 t2=0
+[SCHED] cur=2 t0=0 t1=0 t2=1
+[SCHED] cur=0 t0=1 t1=0 t2=0
+[SCHED] cur=1 t0=0 t1=1 t2=0
+[SCHED] cur=2 t0=0 t1=0 t2=1
+[SCHED] cur=0 t0=1 t1=0 t2=0
+[SCHED] cur=1 t0=0 t1=1 t2=0
+[SCHED] cur=2 t0=0 t1=0 t2=1
+[SCHED] cur=0 t0=1 t1=0 t2=0
+[SCHED] cur=1 t0=0 t1=1 t2=0
+[SCHED] cur=2 t0=0 t1=0 t2=1
+[SCHED] cur=0 t0=1 t1=0 t2=0
+[SCHED] cur=1 t0=0 t1=1 t2=0
+[SCHED] cur=2 t0=0 t1=0 t2=1
+[SCHED] cur=0 t0=1 t1=0 t2=0
+[SCHED] cur=1 t0=0 t1=1 t2=0
+[SCHED] cur=2 t0=0 t1=0 t2=1
+[SCHED] cur=0 t0=1 t1=0 t2=0
+[SCHED] cur=1 t0=0 t1=1 t2=0
+[SCHED] cur=2 t0=0 t1=0 t2=1
+[SCHED] cur=0 t0=1 t1=0 t2=0
+[SCHED] cur=1 t0=0 t1=1 t2=0
+[SCHED] cur=2 t0=0 t1=0 t2=1
+[SCHED] cur=0 t0=1 t1=0 t2=0
+[SCHED] cur=1 t0=0 t1=1 t2=0
+[SCHED] cur=2 t0=0 t1=0 t2=1
+[SCHED] cur=0 t0=1 t1=0 t2=0
+[SCHED] cur=1 t0=0 t1=1 t2=0
+[SCHED] cur=2 t0=0 t1=0 t2=1
+[SCHED] cur=0 t0=1 t1=0 t2=0
+[SCHED] cur=1 t0=0 t1=1 t2=0
+[SCHED] cur=2 t0=0 t1=0 t2=1
+[SCHED] cur=0 t0=1 t1=0 t2=0
+[SCHED] cur=1 t0=0 t1=1 t2=0
+[SCHED] cur=2 t0=0 t1=0 t2=1
+[SCHED] cur=0 t0=1 t1=0 t2=0
+[SCHED] cur=1 t0=0 t1=1 t2=0
+[SCHED] cur=2 t0=0 t1=0 t2=1
+[SCHED] cur=0 t0=1 t1=0 t2=0
+[SCHED] cur=1 t0=0 t1=1 t2=0
+[SCHED] cur=2 t0=0 t1=0 t2=1
+[SCHED] cur=0 t0=1 t1=0 t2=0
+[SCHED] cur=1 t0=0 t1=1 t2=0

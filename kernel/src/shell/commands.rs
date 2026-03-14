@@ -98,7 +98,7 @@ fn cmd_clear() -> ShellOutput {
 }
 
 fn cmd_meminfo() -> ShellOutput {
-    let free_mb = crate::pmm::free_bytes() / (1024 * 1024);
+    let free_mb = crate::mem::pmm::free_bytes() / (1024 * 1024);
     ShellOutput::Print(format!("Free physical RAM: {} MB", free_mb))
 }
 
@@ -240,9 +240,9 @@ fn cmd_exec(buf: &[char; BUF_LEN], ctx: &ShellContext) -> ShellOutput {
         None => return ShellOutput::Print("Error: file not found.".into()),
     };
 
-    crate::vga::set_userspace_cursor(20, *ctx.current_y + 16 * (*ctx.global_scale));
+    crate::drivers::vga::console::set_userspace_cursor(20, *ctx.current_y + 16 * (*ctx.global_scale));
 
-    let (pid, _slot) = unsafe { crate::exec::exec_as_task(elf_bytes.as_slice()) };
+    let (pid, _slot) = unsafe { crate::proc::exec::exec_as_task(elf_bytes.as_slice()) };
     if pid == 0 {
         ShellOutput::Print("exec failed.".into())
     } else {

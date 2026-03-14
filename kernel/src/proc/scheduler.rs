@@ -40,7 +40,7 @@ unsafe fn try_switch() {
     if IN_SYSCALL.load(Ordering::Relaxed) {
         return;
     }
-    if let Some((old_rsp_ptr, new_rsp)) = crate::task::next_task_switch() {
+    if let Some((old_rsp_ptr, new_rsp)) = super::task::next_task_switch() {
         switch_to(old_rsp_ptr, new_rsp);
     }
 }

@@ -1,4 +1,4 @@
-use crate::pmm::{alloc_frames, PAGE_SIZE};
+use crate::mem::pmm::{alloc_frames, PAGE_SIZE};
 
 const USER_STACK_PAGES: usize = 16; // 64 KB — C shell needs headroom
 const SYSCALL_STACK_PAGES: usize = 4; // 16 KB — kernel syscall frames
@@ -7,7 +7,7 @@ const SYSCALL_STACK_PAGES: usize = 4; // 16 KB — kernel syscall frames
 /// Returns the PID on success, or 0 on failure.
 pub unsafe fn exec_as_task(elf_data: &[u8]) -> (usize, usize) {
     // ...
-    let entry = match crate::elf::load(elf_data) {
+    let entry = match super::elf::load(elf_data) {
         Ok(e) => e,
         Err(err) => {
             crate::dbg_log!("EXEC", "ELF load failed: {:?}", err);
@@ -34,7 +34,7 @@ pub unsafe fn exec_as_task(elf_data: &[u8]) -> (usize, usize) {
         return (0, 0);
     }
     // ...
-    let slot = match crate::task::spawn_user_task(entry, user_stack_top as u64) {
+    let slot = match super::task::spawn_user_task(entry, user_stack_top as u64) {
         Some(s) => s,
         None => {
             crate::dbg_log!("EXEC", "failed to spawn user task");
@@ -45,7 +45,7 @@ pub unsafe fn exec_as_task(elf_data: &[u8]) -> (usize, usize) {
     // -----------------------------------------------------------------------
     // 5. Register process entry
     // -----------------------------------------------------------------------
-    let pid = crate::process::spawn(slot);
+    let pid = super::spawn(slot);
     crate::dbg_log!("EXEC", "process pid={} running in task slot={}", pid, slot);
     (pid, slot)
 }

@@ -27,7 +27,7 @@ pub unsafe fn write_str(s: &str) {
 macro_rules! serial_fmt {
     ($($arg:tt)*) => {{
         use core::fmt::Write;
-        let mut w = $crate::serial::SerialWriter;
+        let mut w = $crate::drivers::serial::SerialWriter;
         let _ = core::write!(w, $($arg)*);
     }};
 }
