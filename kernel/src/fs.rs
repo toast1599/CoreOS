@@ -1,5 +1,7 @@
 use alloc::vec::Vec;
 
+extern crate alloc;
+
 #[derive(Clone)]
 pub struct File {
     pub name: Vec<char>,
@@ -49,3 +51,5 @@ impl RamFS {
         }
     }
 }
+
+pub static mut FILESYSTEM: Option<RamFS> = None;

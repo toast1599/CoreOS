@@ -2,10 +2,10 @@
 ///
 /// Records TSC cycle counts at key points during kernel initialisation.
 /// Results are displayed via the `boottime` shell command.
-
 // ---------------------------------------------------------------------------
 // TSC helper
 // ---------------------------------------------------------------------------
+extern crate alloc;
 
 /// Read the CPU timestamp counter (cycles since reset).
 #[inline]
@@ -190,4 +190,3 @@ pub fn report() -> alloc::string::String {
 
     out
 }
-

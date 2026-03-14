@@ -36,6 +36,8 @@ pub enum ProcessState {
 // Process descriptor
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
+
 pub struct Process {
     pub pid: usize,
     pub state: ProcessState,
@@ -97,7 +99,13 @@ pub unsafe fn set_brk(new_brk: usize) {
 pub unsafe fn exit(code: i64) {
     if let Some(slot) = crate::task::current_task_slot() {
         if let Some(ref mut p) = PROCESSES[slot] {
-            crate::dbg_log!("PROCESS", "slot={} (pid={}) exited with code={}", slot, p.pid, code);
+            crate::dbg_log!(
+                "PROCESS",
+                "slot={} (pid={}) exited with code={}",
+                slot,
+                p.pid,
+                code
+            );
             p.state = ProcessState::Zombie;
             p.exit_code = code;
         }
@@ -154,25 +162,35 @@ pub unsafe fn alloc_fd(file_idx: usize) -> i64 {
 }
 
 pub unsafe fn get_fd(fd: usize) -> Option<&'static OpenFile> {
-    if fd < 3 { return None; }
+    if fd < 3 {
+        return None;
+    }
     let slot = crate::task::current_task_slot()?;
     let p = PROCESSES[slot].as_ref()?;
     let idx = fd - 3;
-    if idx >= MAX_FDS { return None; }
+    if idx >= MAX_FDS {
+        return None;
+    }
     p.fds[idx].as_ref()
 }
 
 pub unsafe fn get_fd_mut(fd: usize) -> Option<&'static mut OpenFile> {
-    if fd < 3 { return None; }
+    if fd < 3 {
+        return None;
+    }
     let slot = crate::task::current_task_slot()?;
     let p = PROCESSES[slot].as_mut()?;
     let idx = fd - 3;
-    if idx >= MAX_FDS { return None; }
+    if idx >= MAX_FDS {
+        return None;
+    }
     p.fds[idx].as_mut()
 }
 
 pub unsafe fn close_fd(fd: usize) -> bool {
-    if fd < 3 { return false; }
+    if fd < 3 {
+        return false;
+    }
     let slot = match crate::task::current_task_slot() {
         Some(s) => s,
         None => return false,
@@ -182,7 +200,9 @@ pub unsafe fn close_fd(fd: usize) -> bool {
         None => return false,
     };
     let idx = fd - 3;
-    if idx >= MAX_FDS { return false; }
+    if idx >= MAX_FDS {
+        return false;
+    }
     if p.fds[idx].is_some() {
         p.fds[idx] = None;
         true
@@ -190,4 +210,3 @@ pub unsafe fn close_fd(fd: usize) -> bool {
         false
     }
 }
-

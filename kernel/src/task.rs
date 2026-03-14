@@ -1,5 +1,5 @@
 /// Task management — kernel stacks + round-robin scheduler support.
-use crate::pmm::{alloc_frame, alloc_frames, PAGE_SIZE};
+use crate::pmm::{alloc_frames, PAGE_SIZE};
 
 #[repr(C)]
 pub struct Context {
@@ -18,6 +18,7 @@ pub enum TaskState {
     Dead = 2,
 }
 
+#[allow(dead_code)]
 pub struct Task {
     pub rsp: usize,
     pub stack_base: usize,
@@ -84,6 +85,7 @@ pub unsafe fn add_task(entry: fn()) -> bool {
     true
 }
 
+#[allow(dead_code)]
 pub unsafe fn current_idx() -> usize {
     CURRENT
 }
@@ -195,7 +197,7 @@ pub unsafe fn spawn_user_task(entry: u64, stack_top: u64) -> Option<usize> {
 
     // Push the trampoline as the return address.
     sp -= 8;
-    (sp as *mut u64).write(user_task_trampoline as u64);
+    (sp as *mut u64).write(user_task_trampoline as *const () as u64);
 
     // Push zeroed callee-saved Context so switch_to can pop it.
     sp -= core::mem::size_of::<Context>();

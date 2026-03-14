@@ -1,3 +1,5 @@
+#[allow(dead_code)]
+
 /// Minimal x86_64 ELF loader.
 ///
 /// Parses a 64-bit ELF executable from a raw byte slice (e.g. from RamFS),
@@ -20,6 +22,7 @@ pub enum ElfError {
     NotExecutable,
     NotX86_64,
     NoProgramHeaders,
+    #[allow(dead_code)]
     OomLoadingSegment,
 }
 

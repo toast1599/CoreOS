@@ -10,7 +10,7 @@
 ///   - Loads new_rsp into rsp
 ///   - Pops callee-saved registers from the NEW stack
 ///   - Returns → lands at the new task's saved rip
-use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, Ordering};
 
 #[no_mangle]
 pub static IN_SYSCALL: AtomicBool = AtomicBool::new(false);

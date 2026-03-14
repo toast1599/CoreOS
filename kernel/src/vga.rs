@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::boot::CoreOS_BootInfo;
 use core::fmt::Write;
 use core::ptr::addr_of;
@@ -331,7 +333,15 @@ pub unsafe fn clear_from(start_y: usize, _boot_info: *const CoreOS_BootInfo) {
     if fb_base == 0 || fb_w == 0 || fb_h <= start_y {
         return;
     }
-    draw_rect_raw(0, start_y, fb_w, fb_h - start_y, BG_COLOR, fb_base, fb_pitch);
+    draw_rect_raw(
+        0,
+        start_y,
+        fb_w,
+        fb_h - start_y,
+        BG_COLOR,
+        fb_base,
+        fb_pitch,
+    );
 }
 
 pub unsafe fn clear_line(y: usize, scale: usize, _boot_info: *const CoreOS_BootInfo) {

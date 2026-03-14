@@ -1,3 +1,6 @@
+#![allow(dead_code)]
+#![allow(unused_variables)] // read mod.rs (same dir)
+
 /// Shell command handlers.
 ///
 /// Each command receives a `ShellContext` (mutable access to kernel state)

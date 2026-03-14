@@ -8,34 +8,37 @@
 
 extern crate alloc;
 
-mod bench;
+// --- Core Architecture & Hardware ---
 mod boot;
-mod debug;
-mod elf;
-mod exec;
-mod fs;
 mod gdt;
-mod heap;
-mod hw;
+mod hw; // Centralized hardware (PIC, PIT, PS2, RTC, etc.)
 mod idt;
 mod paging;
 mod pmm;
+mod serial;
+mod syscall;
+mod vga;
+
+// --- Memory & Execution ---
+mod elf;
+mod exec;
+mod heap;
 mod process;
 mod scheduler;
-mod serial;
-mod shell;
-mod syscall;
 mod task;
-mod vga;
+
+// --- Filesystem & UI ---
+mod bench;
+mod debug;
+mod fs;
+mod shell;
+
+//
 
 use crate::heap::SlabAllocator;
 use core::fmt::Write;
 use core::panic::PanicInfo;
 use vga::Console;
-
-pub mod main_fs {
-    pub static mut FILESYSTEM: Option<crate::fs::RamFS> = None;
-}
 
 // ---------------------------------------------------------------------------
 // Global allocator
@@ -128,45 +131,29 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
     bench::stamp(bench::Phase::PmmDone);
 
     // -----------------------------------------------------------------------
-    // 2b. Save user ELF bytes to a static buffer before anything can
-    //     overwrite 0x200000 (paging, heap, etc.)
+    // 2b. Save user ELF bytes to a static buffer
     // -----------------------------------------------------------------------
-    static mut ELF_BUF: [u8; 64 * 1024] = [0u8; 64 * 1024]; // 64 KB max
+    static mut ELF_BUF: [u8; 64 * 1024] = [0u8; 64 * 1024];
     static mut ELF_LEN: usize = 0;
-    static mut FONT_BUF: [u8; 16 * 1024] = [0u8; 16 * 1024]; // 16 KB max
+    static mut FONT_BUF: [u8; 16 * 1024] = [0u8; 16 * 1024];
     static mut FONT_LEN: usize = 0;
-    {
-        let font_base = core::ptr::read_unaligned(core::ptr::addr_of!((*boot_info).font_base));
-        let font_size =
-            core::ptr::read_unaligned(core::ptr::addr_of!((*boot_info).font_size)) as usize;
 
-        if font_base != 0 && font_size > 0 && font_size <= FONT_BUF.len() {
-            let src = core::slice::from_raw_parts(font_base as *const u8, font_size);
-            FONT_BUF[..font_size].copy_from_slice(src);
-            FONT_LEN = font_size;
-            serial::write_str("font loaded into static buffer\n");
-        }
+    let font_base = (*boot_info).font_base;
+    let font_size = (*boot_info).font_size as usize;
+    if font_base != 0 && font_size > 0 && font_size <= FONT_BUF.len() {
+        let src = core::slice::from_raw_parts(font_base as *const u8, font_size);
+        FONT_BUF[..font_size].copy_from_slice(src);
+        FONT_LEN = font_size;
+        serial::write_str("font loaded into static buffer\n");
     }
-    {
-        let elf_base = core::ptr::read_unaligned(core::ptr::addr_of!((*boot_info).user_elf_base));
-        let elf_size =
-            core::ptr::read_unaligned(core::ptr::addr_of!((*boot_info).user_elf_size)) as usize;
 
-        serial_fmt!("elf_base={:#x} elf_size={}\n", elf_base, elf_size);
-
-        if elf_base != 0 && elf_size > 0 && elf_size <= ELF_BUF.len() {
-            let src = core::slice::from_raw_parts(elf_base as *const u8, elf_size);
-            serial_fmt!(
-                "ELF magic: {:x} {:x} {:x} {:x}\n",
-                src[0],
-                src[1],
-                src[2],
-                src[3]
-            );
-            ELF_BUF[..elf_size].copy_from_slice(src);
-            ELF_LEN = elf_size;
-            serial::write_str("elf bytes saved to static buffer\n");
-        }
+    let elf_base = (*boot_info).user_elf_base;
+    let elf_size = (*boot_info).user_elf_size as usize;
+    if elf_base != 0 && elf_size > 0 && elf_size <= ELF_BUF.len() {
+        let src = core::slice::from_raw_parts(elf_base as *const u8, elf_size);
+        ELF_BUF[..elf_size].copy_from_slice(src);
+        ELF_LEN = elf_size;
+        serial::write_str("elf bytes saved to static buffer\n");
     }
 
     // -----------------------------------------------------------------------
@@ -185,7 +172,7 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
     // -----------------------------------------------------------------------
     // 4. Kernel subsystems
     // -----------------------------------------------------------------------
-    main_fs::FILESYSTEM = Some(fs::RamFS::new());
+    fs::FILESYSTEM = Some(fs::RamFS::new());
 
     // Load saved ELF bytes into RamFS now that heap is available
     if ELF_LEN > 0 {
@@ -198,7 +185,7 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
             ELF_BUF[3]
         );
         let name: &[char] = &['t', 'e', 's', 't'];
-        if let Some(ref mut fs) = main_fs::FILESYSTEM {
+        if let Some(ref mut fs) = fs::FILESYSTEM {
             if fs.create(name) {
                 if let Some(f) = fs.find_mut(name) {
                     f.data.extend_from_slice(&ELF_BUF[..ELF_LEN]);
@@ -274,8 +261,8 @@ pub unsafe extern "win64" fn _start(boot_info: *const boot::CoreOS_BootInfo) -> 
 // ---------------------------------------------------------------------------
 
 unsafe fn run_shell(boot_info: *const boot::CoreOS_BootInfo) -> ! {
-    let width = core::ptr::read_unaligned(core::ptr::addr_of!((*boot_info).width)) as usize;
-    let height = core::ptr::read_unaligned(core::ptr::addr_of!((*boot_info).height)) as usize;
+    let width = (*boot_info).width as usize;
+    let height = (*boot_info).height as usize;
 
     // Clear screen
     vga::draw_rect(0, 0, width, height, vga::BG_COLOR, boot_info);
@@ -295,25 +282,19 @@ unsafe fn run_shell(boot_info: *const boot::CoreOS_BootInfo) -> ! {
 
     loop {
         let name: &[char] = &['t', 'e', 's', 't'];
-        let elf_data = {
-            if let Some(ref fs) = main_fs::FILESYSTEM {
-                if let Some(f) = fs.find(name) {
-                    Some(f.data.clone())
-                } else {
-                    None
-                }
-            } else {
-                None
+        let mut elf_data = None;
+
+        if let Some(ref fs) = fs::FILESYSTEM {
+            if let Some(f) = fs.find(name) {
+                elf_data = Some(f.data.clone());
             }
-        };
+        }
 
         if let Some(data) = elf_data {
             let (pid, slot) = crate::exec::exec_as_task(&data);
             if pid > 0 {
                 let mut last_s = 255u8;
-                // Wait for userspace shell to exit
                 while process::is_running_in_slot(slot) {
-                    // Update clock
                     let (h, m, s) = hw::rtc::get_time();
                     if s != last_s {
                         let clock_x = width - 150;
@@ -321,19 +302,26 @@ unsafe fn run_shell(boot_info: *const boot::CoreOS_BootInfo) -> ! {
                         draw_clock(boot_info, clock_x, 20, h, m, s);
                         last_s = s;
                     }
-
                     core::arch::asm!("hlt");
                 }
                 if let Some(code) = process::reap_slot(slot) {
-                    serial_fmt!("Userspace shell (pid {}) exited with code {}. Restarting...\n", pid, code);
+                    serial_fmt!(
+                        "Userspace shell (pid {}) exited with code {}. Restarting...\n",
+                        pid,
+                        code
+                    );
                 }
             } else {
                 serial::write_str("Failed to spawn userspace shell. Hitting hlt loop.\n");
-                loop { core::arch::asm!("hlt"); }
+                loop {
+                    core::arch::asm!("hlt");
+                }
             }
         } else {
             serial::write_str("test.elf not found in RamFS. Hitting hlt loop.\n");
-            loop { core::arch::asm!("hlt"); }
+            loop {
+                core::arch::asm!("hlt");
+            }
         }
     }
 }

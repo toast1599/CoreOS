@@ -1,3 +1,6 @@
+#![allow(dead_code)]
+#![allow(unused_variables)]
+
 /// GDT + TSS
 ///
 /// Layout (matches x86_64 System V ABI expectations):

@@ -35,7 +35,7 @@ pub unsafe fn init() {
     let star: u64 = (0x0018u64 << 48) | (0x0008u64 << 32);
     wrmsr(MSR_STAR, star);
 
-    wrmsr(MSR_LSTAR, syscall_entry as u64);
+    wrmsr(MSR_LSTAR, syscall_entry as *const () as u64);
 
     // SFMASK: clear IF (bit 9) on syscall entry so we start with interrupts off.
     // We never re-enable them inside the handler — sysretq restores R11 → RFLAGS.
@@ -44,12 +44,13 @@ pub unsafe fn init() {
     crate::dbg_log!(
         "SYSCALL",
         "gate installed (LSTAR={:#x})",
-        syscall_entry as u64
+        syscall_entry as *const () as u64
     );
 }
 
 extern "C" {
     fn syscall_entry();
+    #[allow(dead_code)]
     static mut TSS_RSP0: u64;
 }
 
@@ -155,7 +156,7 @@ syscall_entry:
 // ---------------------------------------------------------------------------
 
 unsafe fn fs_find_idx(name: &[char]) -> Option<usize> {
-    crate::main_fs::FILESYSTEM
+    crate::fs::FILESYSTEM
         .as_ref()?
         .files
         .iter()
@@ -163,14 +164,14 @@ unsafe fn fs_find_idx(name: &[char]) -> Option<usize> {
 }
 
 unsafe fn fs_file_size(file_idx: usize) -> usize {
-    match crate::main_fs::FILESYSTEM.as_ref() {
+    match crate::fs::FILESYSTEM.as_ref() {
         Some(fs) if file_idx < fs.files.len() => fs.files[file_idx].data.len(),
         _ => 0,
     }
 }
 
 unsafe fn fs_read(file_idx: usize, offset: usize, buf: *mut u8, count: usize) -> usize {
-    let fs = match crate::main_fs::FILESYSTEM.as_ref() {
+    let fs = match crate::fs::FILESYSTEM.as_ref() {
         Some(f) => f,
         None => return 0,
     };
@@ -188,7 +189,7 @@ unsafe fn fs_read(file_idx: usize, offset: usize, buf: *mut u8, count: usize) ->
 }
 
 unsafe fn fs_clone_by_name(name: &[char]) -> Option<alloc::vec::Vec<u8>> {
-    let fs = crate::main_fs::FILESYSTEM.as_ref()?;
+    let fs = crate::fs::FILESYSTEM.as_ref()?;
     let file = fs.files.iter().find(|f| f.name.as_slice() == name)?;
     Some(file.data.clone())
 }
@@ -236,9 +237,7 @@ pub extern "C" fn syscall_dispatch(num: u64, arg1: u64, arg2: u64, arg3: u64) ->
             }
         }
         61 => unsafe { syscall_waitpid(arg1) },
-        20 => {
-            crate::pmm::free_bytes() as u64
-        },
+        20 => crate::pmm::free_bytes() as u64,
         21 => crate::hw::pit::uptime_seconds(),
         22 => crate::hw::pit::ticks(),
         23 => unsafe {
@@ -465,7 +464,7 @@ unsafe fn syscall_brk(addr: u64) -> u64 {
 // ---------------------------------------------------------------------------
 
 unsafe fn syscall_ls(buf_ptr: u64, buf_len: u64) -> u64 {
-    let fs = match crate::main_fs::FILESYSTEM.as_ref() {
+    let fs = match crate::fs::FILESYSTEM.as_ref() {
         Some(f) => f,
         None => return 0,
     };
@@ -498,7 +497,7 @@ unsafe fn syscall_touch(name_ptr: u64, name_len: u64) -> u64 {
         name_buf[i] = b as char;
     }
     let name = &name_buf[..name_len as usize];
-    match crate::main_fs::FILESYSTEM.as_mut() {
+    match crate::fs::FILESYSTEM.as_mut() {
         Some(fs) => {
             if fs.create(name) {
                 0
@@ -520,7 +519,7 @@ unsafe fn syscall_rm(name_ptr: u64, name_len: u64) -> u64 {
         name_buf[i] = b as char;
     }
     let name = &name_buf[..name_len as usize];
-    match crate::main_fs::FILESYSTEM.as_mut() {
+    match crate::fs::FILESYSTEM.as_mut() {
         Some(fs) => {
             if fs.remove(name) {
                 0
@@ -544,7 +543,7 @@ unsafe fn syscall_write_file(name_ptr: u64, name_len: u64, args_ptr: u64) -> u64
         name_buf[i] = b as char;
     }
     let name = &name_buf[..name_len as usize];
-    let fs = match crate::main_fs::FILESYSTEM.as_mut() {
+    let fs = match crate::fs::FILESYSTEM.as_mut() {
         Some(f) => f,
         None => return u64::MAX,
     };
@@ -570,7 +569,7 @@ unsafe fn syscall_push_file(name_ptr: u64, name_len: u64, args_ptr: u64) -> u64 
         name_buf[i] = b as char;
     }
     let name = &name_buf[..name_len as usize];
-    let fs = match crate::main_fs::FILESYSTEM.as_mut() {
+    let fs = match crate::fs::FILESYSTEM.as_mut() {
         Some(f) => f,
         None => return u64::MAX,
     };

@@ -8,6 +8,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 // I/O helpers
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
 #[inline]
 pub unsafe fn read_status() -> u8 {
     let status: u8;
@@ -233,4 +234,3 @@ fn alpha_scancode(sc: u8, upper: bool) -> char {
         ch
     }
 }
-

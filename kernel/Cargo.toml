@@ -9,3 +9,6 @@ edition = "2021"
 panic = "abort"
 opt-level = 1
 lto = false
+
+[profile.dev]
+panic = "abort"

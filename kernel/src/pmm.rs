@@ -96,8 +96,12 @@ pub unsafe fn alloc_frame() -> usize {
 }
 
 pub unsafe fn alloc_frames(count: usize) -> usize {
-    if count == 0 { return 0; }
-    if count == 1 { return alloc_frame(); }
+    if count == 0 {
+        return 0;
+    }
+    if count == 1 {
+        return alloc_frame();
+    }
 
     let mut consecutive = 0;
     let mut start_frame = 0;
@@ -155,6 +159,7 @@ pub unsafe fn mark_frame_used(phys_addr: usize) {
 }
 
 /// Returns true if the given physical frame is free in the bitmap.
+#[allow(dead_code)]
 pub unsafe fn is_frame_free_at(phys_addr: usize) -> bool {
     let f = phys_addr / PAGE_SIZE;
     if f >= MAX_FRAMES {
@@ -164,7 +169,5 @@ pub unsafe fn is_frame_free_at(phys_addr: usize) -> bool {
 }
 
 pub fn free_bytes() -> usize {
-    unsafe {
-        FREE_FRAMES * PAGE_SIZE
-    }
+    unsafe { FREE_FRAMES * PAGE_SIZE }
 }

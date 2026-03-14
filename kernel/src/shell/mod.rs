@@ -1,3 +1,6 @@
+#![allow(dead_code)]
+#![allow(unused_variables)]
+
 /// Shell — input buffer management and command dispatch.
 ///
 /// The shell owns a fixed-size character buffer and a cursor position.
@@ -108,4 +111,3 @@ pub fn get_rest(buffer: &[char; BUF_LEN], skip: usize) -> &[char] {
     }
     &buffer[skip..end]
 }
-

@@ -1,4 +1,4 @@
-use crate::pmm::{alloc_frame, alloc_frames, PAGE_SIZE};
+use crate::pmm::{alloc_frames, PAGE_SIZE};
 
 const USER_STACK_PAGES: usize = 16; // 64 KB — C shell needs headroom
 const SYSCALL_STACK_PAGES: usize = 4; // 16 KB — kernel syscall frames

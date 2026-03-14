@@ -11,6 +11,7 @@ pub struct KeyBuffer {
 unsafe impl Sync for KeyBuffer {}
 
 impl KeyBuffer {
+    #[allow(dead_code)]
     pub const fn new() -> Self {
         Self {
             buf: UnsafeCell::new(['\0'; BUF_SIZE]),
@@ -19,6 +20,7 @@ impl KeyBuffer {
         }
     }
 
+    #[allow(dead_code)]
     pub fn push(&self, c: char) {
         unsafe {
             let head = *self.head.get();
@@ -43,6 +45,7 @@ impl KeyBuffer {
             Some(c)
         }
     }
+    #[allow(dead_code)]
     pub fn flush(&self) {
         unsafe {
             *self.head.get() = 0;
