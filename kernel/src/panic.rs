@@ -1,5 +1,6 @@
-use core::panic::PanicInfo;
 use crate::drivers::serial;
+#[cfg(not(test))]
+use core::panic::PanicInfo;
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
@@ -100,7 +101,12 @@ pub extern "C" fn default_exception(frame: &InterruptFrame) {
             frame.r14,
             frame.r15
         );
-        crate::serial_fmt!("CS ={:#x} SS ={:#x} RFLAGS={:#x}\n", frame.cs, frame.ss, frame.rflags);
+        crate::serial_fmt!(
+            "CS ={:#x} SS ={:#x} RFLAGS={:#x}\n",
+            frame.cs,
+            frame.ss,
+            frame.rflags
+        );
 
         // Mark process as exited with error code so kernel shell can reap it
         crate::proc::exit(frame.vector as i64);

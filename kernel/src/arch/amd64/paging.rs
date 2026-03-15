@@ -8,6 +8,7 @@ const PTE_HUGE: u64 = 1 << 7;
 const PTE_USER: u64 = 1 << 2;
 
 pub const PHYSICAL_OFFSET: usize = 0xFFFF800000000000;
+pub static mut KERNEL_PML4: usize = 0;
 
 #[inline(always)]
 pub fn p2v(phys: usize) -> usize {
@@ -46,28 +47,56 @@ pub unsafe fn init(boot_info: *const CoreOS_BootInfo) {
     let id_pdpt = alloc_table();
 
     // 0xFFFFFFFF80000000 -> PML4 511 (Kernel Map)
-    write_entry(pml4, 511, k_pdpt as u64 | PTE_PRESENT | PTE_WRITABLE | PTE_USER);
+    write_entry(
+        pml4,
+        511,
+        k_pdpt as u64 | PTE_PRESENT | PTE_WRITABLE | PTE_USER,
+    );
 
     // 0xFFFF800000000000 -> PML4 256 (Direct Map)
-    write_entry(pml4, 256, dm_pdpt as u64 | PTE_PRESENT | PTE_WRITABLE | PTE_USER);
+    write_entry(
+        pml4,
+        256,
+        dm_pdpt as u64 | PTE_PRESENT | PTE_WRITABLE | PTE_USER,
+    );
 
     // 0x0000000000000000 -> PML4 0 (Identity map)
-    write_entry(pml4, 0, id_pdpt as u64 | PTE_PRESENT | PTE_WRITABLE | PTE_USER);
+    write_entry(
+        pml4,
+        0,
+        id_pdpt as u64 | PTE_PRESENT | PTE_WRITABLE | PTE_USER,
+    );
 
     // Map first 4GB into Direct Map AND Identity Map.
     for i in 0..4usize {
         let pd = alloc_table();
-        write_entry(dm_pdpt, i, pd as u64 | PTE_PRESENT | PTE_WRITABLE | PTE_USER);
-        write_entry(id_pdpt, i, pd as u64 | PTE_PRESENT | PTE_WRITABLE | PTE_USER);
-        
+        write_entry(
+            dm_pdpt,
+            i,
+            pd as u64 | PTE_PRESENT | PTE_WRITABLE | PTE_USER,
+        );
+        write_entry(
+            id_pdpt,
+            i,
+            pd as u64 | PTE_PRESENT | PTE_WRITABLE | PTE_USER,
+        );
+
         // Also map the first 1GB into Kernel Map (k_pdpt[510])
         if i == 0 {
-            write_entry(k_pdpt, 510, pd as u64 | PTE_PRESENT | PTE_WRITABLE | PTE_USER);
+            write_entry(
+                k_pdpt,
+                510,
+                pd as u64 | PTE_PRESENT | PTE_WRITABLE | PTE_USER,
+            );
         }
 
         for j in 0..512usize {
             let phys = ((i * 512 + j) as u64) * (2 * 1024 * 1024);
-            write_entry(pd, j, phys | PTE_PRESENT | PTE_WRITABLE | PTE_HUGE | PTE_USER);
+            write_entry(
+                pd,
+                j,
+                phys | PTE_PRESENT | PTE_WRITABLE | PTE_HUGE | PTE_USER,
+            );
         }
     }
 
@@ -80,8 +109,14 @@ pub unsafe fn init(boot_info: *const CoreOS_BootInfo) {
         map_range_2mb(pml4, fb_base, fb_phys, fb_size);
     }
 
+    KERNEL_PML4 = pml4;
+
     core::arch::asm!("mov cr3, {}", in(reg) pml4 as u64, options(nostack, nomem));
-    crate::dbg_log!("PAGING", "direct map & kernel map active (PML4 @ {:#x})", pml4);
+    crate::dbg_log!(
+        "PAGING",
+        "direct map & kernel map active (PML4 @ {:#x})",
+        pml4
+    );
 }
 
 unsafe fn map_range_2mb(pml4: usize, virt_start: usize, phys_start: usize, size: usize) {
@@ -157,4 +192,21 @@ pub unsafe fn map_page(virt: usize, phys: usize) {
 
     // Flush TLB
     core::arch::asm!("invlpg [{}]", in(reg) virt, options(nostack, nomem));
+}
+
+pub unsafe fn clone_kernel_address_space() -> usize {
+    let new_pml4 = alloc_frame();
+
+    let src = p2v(KERNEL_PML4) as *const u64;
+    let dst = p2v(new_pml4) as *mut u64;
+
+    // copy identity map
+    dst.add(0).write(src.add(0).read());
+
+    // copy kernel half
+    for i in 256..512 {
+        dst.add(i).write(src.add(i).read());
+    }
+
+    new_pml4
 }

@@ -29,7 +29,8 @@ pub unsafe fn yield_now() {
 pub fn tick() {
     let t = crate::hw::pit::ticks();
 
-    if t % 10 == 0 { // switch every 10 ticks
+    if t % 10 == 0 {
+        // switch every 10 ticks
         unsafe {
             try_switch();
         }
@@ -47,7 +48,7 @@ unsafe fn try_switch() {
 
 /// Low-level context switch.
 ///
-/// Calling convention: this is a normal Rust `extern "C"` function.
+/// Calling convention: ts lowk a normal Rust `extern "C"` function.
 /// It pushes/pops callee-saved regs (rbp, rbx, r12–r15) manually so
 /// that each task's stack contains exactly a `task::Context` when suspended.
 ///

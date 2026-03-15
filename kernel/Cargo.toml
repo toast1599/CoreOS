@@ -3,6 +3,11 @@ name = "kernel"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "kernel"
+test = false
+path = "src/main.rs" 
+
 [dependencies]
 
 [profile.release]

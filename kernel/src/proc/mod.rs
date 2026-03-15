@@ -1,7 +1,7 @@
-pub mod task;
-pub mod scheduler;
-pub mod exec;
 pub mod elf;
+pub mod exec;
+pub mod scheduler;
+pub mod task;
 
 use core::sync::atomic::{AtomicUsize, Ordering};
 
@@ -45,6 +45,7 @@ pub struct Process {
     pub task_slot: usize,
     pub exit_code: i64,
     pub program_break: usize,
+    pub pml4: usize,
     /// Per-process file descriptor table. fd 0/1/2 are stdin/stdout/stderr
     /// (handled specially in syscall.rs); fds 3+ index into this table as
     /// `fds[fd - 3]`.
@@ -65,7 +66,7 @@ pub static mut PROCESSES: [Option<Process>; 8] = [None, None, None, None, None, 
 // ---------------------------------------------------------------------------
 
 /// Spawn a new process entry in the given task slot.
-pub unsafe fn spawn(task_slot: usize) -> usize {
+pub unsafe fn spawn(task_slot: usize, pml4: usize) -> usize {
     let pid = NEXT_PID.fetch_add(1, Ordering::Relaxed);
     PROCESSES[task_slot] = Some(Process {
         pid,
@@ -73,6 +74,7 @@ pub unsafe fn spawn(task_slot: usize) -> usize {
         task_slot,
         exit_code: 0,
         program_break: 0x4000_0000,
+        pml4,
         fds: [None, None, None, None, None, None, None, None],
     });
     crate::dbg_log!("PROCESS", "spawned pid={} at slot={}", pid, task_slot);

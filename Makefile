@@ -99,7 +99,7 @@ run: $(IMAGE)
 # Project Context Dump
 # =========================
 
-CONTEXT_FILE = .project_context.txt
+CONTEXT_FILE = .project_context.md
 
 context:
 	@echo "Generating project context..."

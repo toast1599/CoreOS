@@ -25,6 +25,7 @@ pub struct Task {
     pub state: TaskState,
     pub id: usize,
     pub rsp_valid: bool,
+    pub pml4: usize,
 }
 
 pub const MAX_TASKS: usize = 8;
@@ -73,6 +74,7 @@ pub unsafe fn add_task(entry: fn()) -> bool {
         stack_base,
         state: TaskState::Ready,
         id,
+        pml4: crate::arch::paging::KERNEL_PML4,
         rsp_valid: true,
     });
     crate::dbg_log!(
@@ -157,6 +159,7 @@ pub unsafe fn init_main_task(stack_base: usize) {
         stack_base,
         state: TaskState::Running,
         id: 0,
+        pml4: crate::arch::paging::KERNEL_PML4,
         rsp_valid: true,
     });
     CURRENT = 0;
@@ -165,7 +168,7 @@ pub unsafe fn init_main_task(stack_base: usize) {
 
 /// Spawn a user task that will jump to ring 3 at `entry` with `stack_top`.
 /// Returns the task slot index, or None on failure.
-pub unsafe fn spawn_user_task(entry: u64, stack_top: u64) -> Option<usize> {
+pub unsafe fn spawn_user_task(entry: u64, stack_top: u64, pml4: usize) -> Option<usize> {
     let slot = match TASKS.iter_mut().position(|t| t.is_none()) {
         Some(s) => s,
         None => {
@@ -189,9 +192,12 @@ pub unsafe fn spawn_user_task(entry: u64, stack_top: u64) -> Option<usize> {
     let kstack_top = stack_base + stack_pages * PAGE_SIZE;
     let mut sp = kstack_top;
 
-    // Push entry point and stack top for the trampoline to read.
+    // Push values for trampoline: entry, user stack, pml4
+    sp -= 8;
+    (sp as *mut u64).write(pml4 as u64);
     sp -= 8;
     (sp as *mut u64).write(stack_top);
+
     sp -= 8;
     (sp as *mut u64).write(entry);
 
@@ -218,6 +224,7 @@ pub unsafe fn spawn_user_task(entry: u64, stack_top: u64) -> Option<usize> {
         stack_base,
         state: TaskState::Ready,
         id,
+        pml4,
         rsp_valid: true,
     });
 
@@ -234,17 +241,21 @@ pub unsafe fn spawn_user_task(entry: u64, stack_top: u64) -> Option<usize> {
     Some(slot)
 }
 
-/// Trampoline — called via ret from switch_to.
-/// Stack at entry: [entry: u64, stack_top: u64]
+/// Trampoline — called via ret from switch_to,
+/// Stack at entry:
+/// [entry: u64, stack_top: u64, pml4: u64]
 /// Drops to ring 3 via iretq.
 #[unsafe(naked)]
 unsafe extern "C" fn user_task_trampoline() -> ! {
     core::arch::naked_asm!(
-        // entry is at [rsp], stack_top is at [rsp+8]
         "pop rdi", // entry point
         "pop rsi", // user stack top
+        "pop rdx", // pml4
+        // switch address space
+        "mov cr3, rdx",
+        // jump into helper that performs iretq
         "call user_task_iretq",
-        "ud2", // should never reach here
+        "ud2",
     );
 }
 

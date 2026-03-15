@@ -12,4 +12,4 @@ BOOTX64.EFI
 NvVars
 
 # context
-.project_context.txt
+.project_context.md

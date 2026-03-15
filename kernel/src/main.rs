@@ -3,17 +3,20 @@
 
 #![feature(alloc_error_handler)]
 #![allow(static_mut_refs)]
-#![no_std]
 #![no_main]
+#![no_std]
+#![cfg_attr(test, no_main)]
+#![feature(custom_test_frameworks)]
+#![reexport_test_harness_main = "test_main"]
 
 extern crate alloc;
 
 // --- Architecture ---
 mod arch;
 mod boot;
+mod drivers;
 mod hw; // Centralized hardware (PIC, PIT, PS2, RTC, etc.)
 mod mem;
-mod drivers;
 mod syscall;
 
 // --- Memory & Execution ---
@@ -23,8 +26,8 @@ mod proc;
 mod bench;
 mod debug;
 mod fs;
-mod shell;
 mod panic;
+mod shell;
 
 use crate::mem::heap::SlabAllocator;
 
@@ -88,22 +91,36 @@ pub unsafe extern "win64" fn _start(boot_info_phys: *const boot::CoreOS_BootInfo
     // -----------------------------------------------------------------------
     // The bootloader preserves the UEFI identity map, so we can use boot_info_phys directly first.
     static mut BOOT_INFO_DATA: boot::CoreOS_BootInfo = boot::CoreOS_BootInfo {
-        fb_base: 0, fb_size: 0, width: 0, height: 0, pitch: 0,
-        mmap: [boot::MemMapEntry { physical_start: 0, num_pages: 0, mem_type: 0, _pad: 0 }; 256],
-        mmap_count: 0, _pad: 0,
-        user_elf_base: 0, user_elf_size: 0,
-        font_base: 0, font_size: 0,
+        fb_base: 0,
+        fb_size: 0,
+        width: 0,
+        height: 0,
+        pitch: 0,
+        mmap: [boot::MemMapEntry {
+            physical_start: 0,
+            num_pages: 0,
+            mem_type: 0,
+            _pad: 0,
+        }; 256],
+        mmap_count: 0,
+        _pad: 0,
+        user_elf_base: 0,
+        user_elf_size: 0,
+        font_base: 0,
+        font_size: 0,
         tsc_bootloader_start: 0,
     };
     BOOT_INFO_DATA = core::ptr::read_unaligned(boot_info_phys);
-    
+
     // Check if the original pointers are valid
     BOOT_INFO_DATA.fb_base = arch::amd64::paging::p2v(BOOT_INFO_DATA.fb_base as usize) as u64;
     if BOOT_INFO_DATA.font_base != 0 {
-        BOOT_INFO_DATA.font_base = arch::amd64::paging::p2v(BOOT_INFO_DATA.font_base as usize) as u64;
+        BOOT_INFO_DATA.font_base =
+            arch::amd64::paging::p2v(BOOT_INFO_DATA.font_base as usize) as u64;
     }
     if BOOT_INFO_DATA.user_elf_base != 0 {
-        BOOT_INFO_DATA.user_elf_base = arch::amd64::paging::p2v(BOOT_INFO_DATA.user_elf_base as usize) as u64;
+        BOOT_INFO_DATA.user_elf_base =
+            arch::amd64::paging::p2v(BOOT_INFO_DATA.user_elf_base as usize) as u64;
     }
     let boot_info = core::ptr::addr_of!(BOOT_INFO_DATA) as *const boot::CoreOS_BootInfo;
 
