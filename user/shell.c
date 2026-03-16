@@ -175,8 +175,20 @@ static void cmd_ls(void) {
       p++;
       continue;
     }
+    int fd = sys_open(p, len);
+    long size = -1;
+    if (fd >= 0) {
+      size = sys_fsize(fd);
+      sys_close(fd);
+    }
     puts(p);
-    puts("\n");
+    puts(" (");
+    if (size >= 0) {
+      print_int(size);
+    } else {
+      puts("?");
+    }
+    puts(" bytes)\n");
     p += len + 1;
   }
 }
