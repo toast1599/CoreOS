@@ -1,8 +1,8 @@
+use crate::drivers::serial;
+use crate::drivers::vga;
+use crate::hw::kbd_buffer;
 use crate::proc;
 use crate::proc::FdTarget;
-use crate::drivers::vga;
-use crate::drivers::serial;
-use crate::hw::kbd_buffer;
 
 #[repr(C)]
 pub struct Stat {
@@ -197,13 +197,15 @@ unsafe fn read_from_fd(fd: usize, buf: *mut u8, count: usize) -> Option<usize> {
     if matches!(proc::get_fd_target(fd), Some(FdTarget::Stdio(0))) {
         for i in 0..count {
             let c = loop {
-                crate::proc::scheduler::IN_SYSCALL.store(false, core::sync::atomic::Ordering::Relaxed);
+                crate::proc::scheduler::IN_SYSCALL
+                    .store(false, core::sync::atomic::Ordering::Relaxed);
                 core::arch::asm!("sti", options(nostack, nomem));
                 for _ in 0..2000 {
                     core::hint::spin_loop();
                 }
                 core::arch::asm!("cli", options(nostack, nomem));
-                crate::proc::scheduler::IN_SYSCALL.store(true, core::sync::atomic::Ordering::Relaxed);
+                crate::proc::scheduler::IN_SYSCALL
+                    .store(true, core::sync::atomic::Ordering::Relaxed);
 
                 if let Some(c) = kbd_buffer::KEYBUF.pop() {
                     break c;
