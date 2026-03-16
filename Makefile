@@ -7,6 +7,7 @@ ESP_DIR   = $(BUILD_DIR)/esp
 EFI_BOOT  = $(ESP_DIR)/EFI/BOOT
 
 IMAGE     = $(BUILD_DIR)/coreos.img
+USER_ELFS = user/shell.elf user/syscall_test.elf user/syscall_child.elf
 
 # =========================
 # Kernel (Rust)
@@ -47,7 +48,7 @@ dirs:
 # Build Rust Kernel
 # =========================
 
-$(KERNEL_BIN): dirs
+$(KERNEL_BIN): dirs $(USER_ELFS)
 	cd kernel && \
 	rustup override set nightly && \
 	cargo build --release \
@@ -68,7 +69,7 @@ $(LOADER_EFI): dirs $(LOADER_SRC)
 # Build Disk Image
 # =========================
 
-$(IMAGE): $(KERNEL_BIN) $(LOADER_EFI) user/shell.elf
+$(IMAGE): $(KERNEL_BIN) $(LOADER_EFI) $(USER_ELFS)
 	dd if=/dev/zero of=$(IMAGE) bs=1M count=64
 	mkfs.fat -F 32 $(IMAGE)
 	mmd -i $(IMAGE) ::/EFI
@@ -76,9 +77,11 @@ $(IMAGE): $(KERNEL_BIN) $(LOADER_EFI) user/shell.elf
 	mcopy -i $(IMAGE) $(LOADER_EFI) ::/EFI/BOOT/
 	mcopy -i $(IMAGE) $(KERNEL_BIN) ::/
 	mcopy -i $(IMAGE) user/shell.elf ::/test.elf
+	mcopy -i $(IMAGE) user/syscall_test.elf ::/syscall_test.elf
+	mcopy -i $(IMAGE) user/syscall_child.elf ::/syscall_child.elf
 	mcopy -i $(IMAGE) assets/font.psfu ::/
 
-user/shell.elf: dirs
+$(USER_ELFS): dirs
 	$(MAKE) -C user
 		
 # =========================

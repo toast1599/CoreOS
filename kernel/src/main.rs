@@ -62,6 +62,52 @@ fn demo_task() {
     }
 }
 
+fn preload_ramfs_file(name: &[char], bytes: &[u8]) {
+    if bytes.is_empty() {
+        return;
+    }
+    let mut fs_guard = fs::FILESYSTEM.lock();
+    if let Some(ref mut fs) = *fs_guard {
+        if fs.find(name).is_none() && fs.create(name) {
+            if let Some(f) = fs.find_mut(name) {
+                f.data.extend_from_slice(bytes);
+            }
+        }
+    }
+}
+
+unsafe fn run_embedded_userspace_test(name: &[char]) {
+    let elf_data = {
+        let mut elf = None;
+        let fs_guard = fs::FILESYSTEM.lock();
+        if let Some(ref fs) = *fs_guard {
+            if let Some(f) = fs.find(name) {
+                elf = Some(f.data.clone());
+            }
+        }
+        elf
+    };
+
+    if let Some(data) = elf_data {
+        crate::serial_fmt!("Running embedded userspace test {:?}\n", name);
+        let (pid, slot) = crate::proc::exec::exec_as_task(&data);
+        if pid == 0 {
+            crate::drivers::serial::write_str("Failed to spawn embedded userspace test\n");
+            return;
+        }
+        while proc::is_running_in_slot(slot) {
+            core::arch::asm!("hlt");
+        }
+        if let Some(code) = proc::reap_slot(slot) {
+            crate::serial_fmt!(
+                "Embedded userspace test pid {} exited with code {}\n",
+                pid,
+                code
+            );
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Kernel entry point
 // ---------------------------------------------------------------------------
@@ -69,6 +115,10 @@ fn demo_task() {
 #[export_name = "_start"]
 #[link_section = ".text._start"]
 pub unsafe extern "win64" fn _start(boot_info_phys: *const boot::CoreOS_BootInfo) -> ! {
+    static EMBEDDED_SHELL: &[u8] = include_bytes!("../../user/shell.elf");
+    static EMBEDDED_SYSCALL_TEST: &[u8] = include_bytes!("../../user/syscall_test.elf");
+    static EMBEDDED_SYSCALL_CHILD: &[u8] = include_bytes!("../../user/syscall_child.elf");
+
     // -----------------------------------------------------------------------
     // -1. Zero BSS (Must happen first for serial_fmt! to work)
     // -----------------------------------------------------------------------
@@ -196,7 +246,22 @@ pub unsafe extern "win64" fn _start(boot_info_phys: *const boot::CoreOS_BootInfo
     // -----------------------------------------------------------------------
     *fs::FILESYSTEM.lock() = Some(fs::RamFS::new());
 
-    // Load saved ELF bytes into RamFS now that heap is available
+    // Load embedded userspace ELFs into RamFS now that heap is available
+    preload_ramfs_file(&['t', 'e', 's', 't'], EMBEDDED_SHELL);
+    preload_ramfs_file(
+        &[
+            's', 'y', 's', 'c', 'a', 'l', 'l', '_', 't', 'e', 's', 't',
+        ],
+        EMBEDDED_SYSCALL_TEST,
+    );
+    preload_ramfs_file(
+        &[
+            's', 'y', 's', 'c', 'a', 'l', 'l', '_', 'c', 'h', 'i', 'l', 'd',
+        ],
+        EMBEDDED_SYSCALL_CHILD,
+    );
+
+    // Preserve the bootloader-provided ELF as a fallback/debug artifact.
     if ELF_LEN > 0 {
         serial_fmt!(
             "ELF_BUF addr={:#x} magic at copy time: {:x} {:x} {:x} {:x}\n",
@@ -206,7 +271,7 @@ pub unsafe extern "win64" fn _start(boot_info_phys: *const boot::CoreOS_BootInfo
             ELF_BUF[2],
             ELF_BUF[3]
         );
-        let name: &[char] = &['t', 'e', 's', 't'];
+        let name: &[char] = &['b', 'o', 'o', 't', '_', 't', 'e', 's', 't'];
         let mut fs_guard = fs::FILESYSTEM.lock();
         if let Some(ref mut fs) = *fs_guard {
             if fs.create(name) {
@@ -273,6 +338,10 @@ pub unsafe extern "win64" fn _start(boot_info_phys: *const boot::CoreOS_BootInfo
     proc::task::add_task(demo_task);
     drivers::serial::write_str("task added\n");
     bench::stamp(bench::Phase::RamfsDone);
+
+    run_embedded_userspace_test(&[
+        's', 'y', 's', 'c', 'a', 'l', 'l', '_', 't', 'e', 's', 't',
+    ]);
 
     // -----------------------------------------------------------------------
     // 7. Shell UI

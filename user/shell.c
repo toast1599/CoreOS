@@ -167,29 +167,9 @@ static void cmd_ls(void) {
     puts("(empty)\n");
     return;
   }
-  char *p = buf;
-  char *end = buf + total;
-  while (p < end) {
-    size_t len = str_len(p);
-    if (len == 0) {
-      p++;
-      continue;
-    }
-    int fd = sys_open(p, len);
-    long size = -1;
-    if (fd >= 0) {
-      size = sys_fsize(fd);
-      sys_close(fd);
-    }
-    puts(p);
-    puts(" (");
-    if (size >= 0) {
-      print_int(size);
-    } else {
-      puts("?");
-    }
-    puts(" bytes)\n");
-    p += len + 1;
+  sys_write(STDOUT, buf, (size_t)total);
+  if (total == 0 || buf[total - 1] != '\n') {
+    puts("\n");
   }
 }
 
@@ -394,7 +374,7 @@ static void dispatch(const char *line) {
 // Main shell loop
 // ---------------------------------------------------------------------------
 
-void shell_main(void) {
+int main(void) {
   println("CoreOS userspace shell");
   println("type 'help' for commands\n");
 
@@ -404,4 +384,5 @@ void shell_main(void) {
     readline(line, CMD_BUF);
     dispatch(line);
   }
+  return 0;
 }

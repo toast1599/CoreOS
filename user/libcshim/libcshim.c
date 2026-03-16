@@ -14,6 +14,92 @@ ssize_t write(int fd, const void *buf, size_t count) {
     return sys_write(fd, buf, count);
 }
 
+int ioctl(int fd, unsigned long req, ...) {
+    va_list ap;
+    void *argp;
+    va_start(ap, req);
+    argp = va_arg(ap, void *);
+    va_end(ap);
+    return sys_ioctl(fd, req, argp);
+}
+
+int fcntl(int fd, int cmd, ...) {
+    va_list ap;
+    long arg = 0;
+    va_start(ap, cmd);
+    arg = va_arg(ap, long);
+    va_end(ap);
+    return sys_fcntl(fd, cmd, arg);
+}
+
+int pipe(int pipefd[2]) {
+    return sys_pipe(pipefd);
+}
+
+ssize_t readv(int fd, const struct iovec *iov, int iovcnt) {
+    return sys_readv(fd, iov, iovcnt);
+}
+
+ssize_t writev(int fd, const struct iovec *iov, int iovcnt) {
+    return sys_writev(fd, iov, iovcnt);
+}
+
+off_t lseek(int fd, off_t offset, int whence) {
+    return (off_t)sys_lseek(fd, (long)offset, whence);
+}
+
+int fstat(int fd, struct stat *st) {
+    return sys_fstat(fd, st);
+}
+
+int getpid(void) {
+    return (int)sys_getpid();
+}
+
+void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off) {
+    return sys_mmap(addr, len, prot, flags, fd, off);
+}
+
+int munmap(void *addr, size_t len) {
+    return sys_munmap(addr, len);
+}
+
+int mprotect(void *addr, size_t len, int prot) {
+    return sys_mprotect(addr, len, prot);
+}
+
+int nanosleep(const struct timespec *req, struct timespec *rem) {
+    return sys_nanosleep(req, rem);
+}
+
+int clock_gettime(int clockid, struct timespec *tp) {
+    return sys_clock_gettime(clockid, tp);
+}
+
+int dup(int fd) {
+    return sys_dup(fd);
+}
+
+int dup2(int oldfd, int newfd) {
+    return sys_dup3(oldfd, newfd, 0);
+}
+
+int dup3(int oldfd, int newfd, int flags) {
+    return sys_dup3(oldfd, newfd, flags);
+}
+
+int fork(void) {
+    return sys_fork();
+}
+
+int openat(int dirfd, const char *path, int flags, ...) {
+    return sys_openat(dirfd, path, str_len(path), flags);
+}
+
+int stat(const char *path, struct stat *st) {
+    return sys_fstatat(AT_FDCWD, path, str_len(path), st);
+}
+
 // ---------------------------------------------------------------------------
 // printf — lightweight, no malloc needed
 // ---------------------------------------------------------------------------

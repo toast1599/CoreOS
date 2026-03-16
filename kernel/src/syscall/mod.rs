@@ -55,11 +55,15 @@ extern "C" {
     static mut TSS_RSP0: u64;
 }
 
+#[no_mangle]
+pub static mut SYSCALL_ARG4: u64 = 0;
+
 global_asm!(
     r#"
 .global syscall_entry
 syscall_entry:
     // Save user RSP, switch to kernel syscall stack.
+    mov  [rip + SYSCALL_ARG4], r10
     mov  r10, rsp
     lea  rsp, [rip + TSS_RSP0]
     mov  rsp, [rsp]
@@ -93,7 +97,9 @@ syscall_entry:
     mov  rsi, [rsp + 8*8]    // rdi slot  → arg1
     mov  rdx, [rsp + 8*7]    // rsi slot  → arg2
     mov  rcx, [rsp + 8*9]    // rdx slot  → arg3
+    mov  r8,  [rip + SYSCALL_ARG4]
 
+    mov  r9, rsp
     call syscall_dispatch
 
     // Store return value back into the rax slot
@@ -127,10 +133,18 @@ syscall_entry:
 );
 
 #[no_mangle]
-pub extern "C" fn syscall_dispatch(num: u64, arg1: u64, arg2: u64, arg3: u64) -> u64 {
+pub extern "C" fn syscall_dispatch(
+    num: u64,
+    arg1: u64,
+    arg2: u64,
+    arg3: u64,
+    arg4: u64,
+    frame: u64,
+) -> u64 {
     match num {
         0 => unsafe { fs::syscall_read(arg1, arg2, arg3) },
         1 => unsafe { fs::syscall_write(arg1, arg2, arg3) },
+        19 => unsafe { fs::syscall_readv(arg1, arg2, arg3) },
         3 => unsafe { fs::syscall_open(arg1, arg2) },
         4 => unsafe {
             if crate::proc::close_fd(arg1 as usize) {
@@ -140,18 +154,31 @@ pub extern "C" fn syscall_dispatch(num: u64, arg1: u64, arg2: u64, arg3: u64) ->
             }
         },
         5 => unsafe { fs::syscall_fsize(arg1) },
+        20 => unsafe { fs::syscall_writev(arg1, arg2, arg3) },
+        22 => unsafe { process::syscall_pipe(arg1) },
+        16 => unsafe { fs::syscall_ioctl(arg1, arg2, arg3) },
+        29 => unsafe { fs::syscall_fstat(arg1, arg2) },
+        30 => unsafe { fs::syscall_lseek(arg1, arg2, arg3) },
         6 => unsafe { fs::syscall_ls(arg1, arg2) },
         7 => unsafe { fs::syscall_touch(arg1, arg2) },
         8 => unsafe { fs::syscall_rm(arg1, arg2) },
         9 => unsafe { fs::syscall_write_file(arg1, arg2, arg3) },
         10 => unsafe { fs::syscall_push_file(arg1, arg2, arg3) },
         12 => unsafe { process::syscall_brk(arg1) },
+        31 => unsafe { process::syscall_mmap(arg1) },
+        32 => unsafe { process::syscall_mprotect(arg1, arg2, arg3) },
+        33 => unsafe { process::syscall_munmap(arg1, arg2) },
+        34 => unsafe { process::syscall_dup(arg1) },
+        35 => unsafe { process::syscall_nanosleep(arg1, arg2) },
+        36 => crate::mem::pmm::free_bytes() as u64,
+        292 => unsafe { process::syscall_dup3(arg1, arg2, arg3) },
+        72 => unsafe { process::syscall_fcntl(arg1, arg2, arg3) },
+        58 => unsafe { process::syscall_fork(frame) },
         57 => unsafe { process::syscall_exec(arg1, arg2) },
         60 => unsafe { process::syscall_exit(arg1) },
         61 => unsafe { process::syscall_waitpid(arg1) },
-        20 => crate::mem::pmm::free_bytes() as u64,
         21 => crate::hw::pit::uptime_seconds(),
-        22 => crate::hw::pit::ticks(),
+        37 => crate::hw::pit::ticks(),
         23 => unsafe {
             crate::hw::reboot();
         },
@@ -170,6 +197,10 @@ pub extern "C" fn syscall_dispatch(num: u64, arg1: u64, arg2: u64, arg3: u64) ->
             crate::drivers::vga::console::set_font_scale(arg1 as usize);
             0
         }
+        39 => unsafe { process::syscall_getpid() },
+        228 => unsafe { process::syscall_clock_gettime(arg1, arg2) },
+        257 => unsafe { fs::syscall_openat(arg1, arg2, arg3, arg4) },
+        262 => unsafe { fs::syscall_fstatat(arg1, arg2, arg3, arg4) },
         _ => {
             crate::dbg_log!("SYSCALL", "unhandled syscall {}", num);
             u64::MAX

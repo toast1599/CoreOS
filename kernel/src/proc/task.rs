@@ -1,6 +1,8 @@
 /// Task management — kernel stacks + round-robin scheduler support.
 use crate::mem::pmm::{alloc_frames, PAGE_SIZE};
 
+const SYSCALL_FRAME_SIZE: usize = 16 * 8;
+
 #[repr(C)]
 pub struct Context {
     pub r15: u64,
@@ -254,6 +256,56 @@ pub unsafe fn spawn_user_task(entry: u64, stack_top: u64, pml4: usize) -> Option
     Some(slot)
 }
 
+pub unsafe fn spawn_forked_task(syscall_frame: *const u8, pml4: usize) -> Option<usize> {
+    let slot = match TASKS.iter_mut().position(|t| t.is_none()) {
+        Some(s) => s,
+        None => {
+            crate::dbg_log!("TASK", "no free task slots for forked task");
+            return None;
+        }
+    };
+
+    let stack_pages = 4;
+    let stack_phys = alloc_frames(stack_pages);
+    if stack_phys == 0 {
+        crate::dbg_log!("TASK", "OOM allocating forked task kernel stack");
+        return None;
+    }
+    let stack_base = crate::arch::paging::p2v(stack_phys);
+    let kstack_top = stack_base + stack_pages * PAGE_SIZE;
+
+    let frame_start = kstack_top - SYSCALL_FRAME_SIZE;
+    core::ptr::copy_nonoverlapping(syscall_frame, frame_start as *mut u8, SYSCALL_FRAME_SIZE);
+    ((frame_start + 88) as *mut u64).write(0);
+
+    let mut sp = frame_start;
+    sp -= 8;
+    (sp as *mut u64).write(fork_return_trampoline as *const () as u64);
+    sp -= core::mem::size_of::<Context>();
+    (sp as *mut Context).write(Context {
+        r15: 0,
+        r14: 0,
+        r13: 0,
+        r12: 0,
+        rbx: 0,
+        rbp: 0,
+    });
+
+    let id = NEXT_ID;
+    NEXT_ID += 1;
+    TASKS[slot] = Some(Task {
+        rsp: sp,
+        stack_base,
+        state: TaskState::Ready,
+        id,
+        pml4,
+        rsp_valid: true,
+    });
+
+    crate::dbg_log!("TASK", "forked user task {} in slot {}", id, slot);
+    Some(slot)
+}
+
 /// Trampoline — called via ret from switch_to,
 /// Stack at entry:
 /// [entry: u64, stack_top: u64, pml4: u64]
@@ -269,6 +321,30 @@ unsafe extern "C" fn user_task_trampoline() -> ! {
         // jump into helper that performs iretq
         "call user_task_iretq",
         "ud2",
+    );
+}
+
+#[unsafe(naked)]
+unsafe extern "C" fn fork_return_trampoline() -> ! {
+    core::arch::naked_asm!(
+        "pop rbp",
+        "pop r15",
+        "pop r14",
+        "pop r13",
+        "pop r12",
+        "pop r9",
+        "pop r8",
+        "pop rsi",
+        "pop rdi",
+        "pop rdx",
+        "pop rbx",
+        "pop rax",
+        "pop rcx",
+        "pop r11",
+        "pop r10",
+        "add rsp, 8",
+        "mov rsp, r10",
+        "sysretq",
     );
 }
 

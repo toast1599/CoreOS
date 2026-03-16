@@ -33,6 +33,20 @@ pub fn get_font_scale() -> usize {
     GLOBAL_SCALE.load(Ordering::Relaxed)
 }
 
+pub fn tty_winsize() -> (u16, u16, u16, u16) {
+    let scale = get_font_scale().max(1);
+    let fb_w = super::FB_WIDTH.load(Ordering::Relaxed);
+    let fb_h = super::FB_HEIGHT.load(Ordering::Relaxed);
+    let cols = fb_w.saturating_sub(40) / (8 * scale);
+    let rows = fb_h.saturating_sub(120) / (16 * scale);
+    (
+        rows.min(u16::MAX as usize) as u16,
+        cols.min(u16::MAX as usize) as u16,
+        fb_w.min(u16::MAX as usize) as u16,
+        fb_h.min(u16::MAX as usize) as u16,
+    )
+}
+
 /// Write a byte to the global framebuffer at the userspace cursor position.
 /// Handles newline and basic scrolling (clears back to y=120 when near bottom).
 pub fn write_byte_to_fb(b: u8) {

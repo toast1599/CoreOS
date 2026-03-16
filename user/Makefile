@@ -16,11 +16,12 @@ LDFLAGS = -T shell.ld \
           --no-dynamic-linker \
           -static
 
-OBJS    = start.o shell.o libcshim/libcshim.o
+COMMON_OBJS = start.o libcshim/libcshim.o
+ALL_ELFS = shell.elf syscall_test.elf syscall_child.elf
 
 .PHONY: all clean
 
-all: shell.elf
+all: $(ALL_ELFS)
 
 start.o: start.asm
 	$(ASM) -f elf64 start.asm -o start.o
@@ -28,11 +29,23 @@ start.o: start.asm
 shell.o: shell.c libcshim/libcshim.h
 	$(CC) $(CFLAGS) -c shell.c -o shell.o
 
+syscall_test.o: syscall_test.c libcshim/libcshim.h
+	$(CC) $(CFLAGS) -c syscall_test.c -o syscall_test.o
+
+syscall_child.o: syscall_child.c libcshim/libcshim.h
+	$(CC) $(CFLAGS) -c syscall_child.c -o syscall_child.o
+
 libcshim/libcshim.o: libcshim/libcshim.c libcshim/libcshim.h
 	$(CC) $(CFLAGS) -c libcshim/libcshim.c -o libcshim/libcshim.o
 
-shell.elf: $(OBJS) shell.ld
-	$(LD) $(LDFLAGS) -o shell.elf $(OBJS)
+shell.elf: $(COMMON_OBJS) shell.o shell.ld
+	$(LD) $(LDFLAGS) -o shell.elf $(COMMON_OBJS) shell.o
+
+syscall_test.elf: $(COMMON_OBJS) syscall_test.o shell.ld
+	$(LD) $(LDFLAGS) -o syscall_test.elf $(COMMON_OBJS) syscall_test.o
+
+syscall_child.elf: $(COMMON_OBJS) syscall_child.o shell.ld
+	$(LD) $(LDFLAGS) -o syscall_child.elf $(COMMON_OBJS) syscall_child.o
 
 clean:
 	rm -f *.o *.elf

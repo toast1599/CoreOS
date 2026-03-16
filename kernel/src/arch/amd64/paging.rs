@@ -7,6 +7,7 @@ const PTE_WRITABLE: u64 = 1 << 1;
 const PTE_USER: u64 = 1 << 2;
 const PTE_HUGE: u64 = 1 << 7;
 const PTE_NX: u64 = 1 << 63;
+const PTE_ADDR_MASK: u64 = 0x000f_ffff_ffff_f000;
 
 pub const PHYSICAL_OFFSET: usize = 0xFFFF800000000000;
 pub static mut KERNEL_PML4: usize = 0;
@@ -40,6 +41,33 @@ unsafe fn alloc_table() -> usize {
         panic!("paging: OOM allocating page table");
     }
     addr
+}
+
+unsafe fn pte_ptr(pml4: usize, virt: usize) -> Option<*mut u64> {
+    let pml4_i = (virt >> 39) & 0x1FF;
+    let pdpt_i = (virt >> 30) & 0x1FF;
+    let pd_i = (virt >> 21) & 0x1FF;
+    let pt_i = (virt >> 12) & 0x1FF;
+
+    let pml4e = (p2v(pml4 + pml4_i * 8) as *const u64).read_volatile();
+    if (pml4e & PTE_PRESENT) == 0 {
+        return None;
+    }
+    let pdpt = (pml4e & !0xFFF) as usize;
+
+    let pdpte = (p2v(pdpt + pdpt_i * 8) as *const u64).read_volatile();
+    if (pdpte & PTE_PRESENT) == 0 {
+        return None;
+    }
+    let pd = (pdpte & !0xFFF) as usize;
+
+    let pde = (p2v(pd + pd_i * 8) as *const u64).read_volatile();
+    if (pde & PTE_PRESENT) == 0 || (pde & PTE_HUGE) != 0 {
+        return None;
+    }
+    let pt = (pde & !0xFFF) as usize;
+
+    Some(p2v(pt + pt_i * 8) as *mut u64)
 }
 
 #[inline]
@@ -218,7 +246,6 @@ pub unsafe fn translate_page(pml4: usize, virt: usize) -> Option<usize> {
     let pml4_i = (virt >> 39) & 0x1FF;
     let pdpt_i = (virt >> 30) & 0x1FF;
     let pd_i = (virt >> 21) & 0x1FF;
-    let pt_i = (virt >> 12) & 0x1FF;
 
     let pml4e = (p2v(pml4 + pml4_i * 8) as *const u64).read_volatile();
     if (pml4e & PTE_PRESENT) == 0 {
@@ -240,13 +267,56 @@ pub unsafe fn translate_page(pml4: usize, virt: usize) -> Option<usize> {
         let base = (pde as usize) & !((2 * 1024 * 1024) - 1);
         return Some(base + (virt & ((2 * 1024 * 1024) - 1)));
     }
-    let pt = (pde & !0xFFF) as usize;
-
-    let pte = (p2v(pt + pt_i * 8) as *const u64).read_volatile();
+    let pte = pte_ptr(pml4, virt)?.read_volatile();
     if (pte & PTE_PRESENT) == 0 {
         return None;
     }
     Some((pte as usize) & !0xFFF)
+}
+
+pub unsafe fn unmap_page_in(pml4: usize, virt: usize) -> Option<usize> {
+    let pte = pte_ptr(pml4, virt)?;
+    let entry = pte.read_volatile();
+    if (entry & PTE_PRESENT) == 0 {
+        return None;
+    }
+    pte.write_volatile(0);
+
+    let cr3: u64;
+    core::arch::asm!("mov {}, cr3", out(reg) cr3, options(nomem, nostack));
+    if (cr3 as usize & !0xFFF) == pml4 {
+        core::arch::asm!("invlpg [{}]", in(reg) virt, options(nostack, nomem));
+    }
+    Some((entry as usize) & !0xFFF)
+}
+
+pub unsafe fn protect_page_in(pml4: usize, virt: usize, flags: MapFlags) -> bool {
+    let pte = match pte_ptr(pml4, virt) {
+        Some(p) => p,
+        None => return false,
+    };
+    let mut entry = pte.read_volatile();
+    if (entry & PTE_PRESENT) == 0 {
+        return false;
+    }
+    entry &= !(PTE_WRITABLE | PTE_USER | PTE_NX);
+    if flags.writable {
+        entry |= PTE_WRITABLE;
+    }
+    if flags.user {
+        entry |= PTE_USER;
+    }
+    if !flags.executable {
+        entry |= PTE_NX;
+    }
+    pte.write_volatile(entry);
+
+    let cr3: u64;
+    core::arch::asm!("mov {}, cr3", out(reg) cr3, options(nomem, nostack));
+    if (cr3 as usize & !0xFFF) == pml4 {
+        core::arch::asm!("invlpg [{}]", in(reg) virt, options(nostack, nomem));
+    }
+    true
 }
 
 pub unsafe fn clone_kernel_address_space() -> usize {
@@ -259,6 +329,82 @@ pub unsafe fn clone_kernel_address_space() -> usize {
     // copy kernel half
     for i in 256..512 {
         dst.add(i).write(src.add(i).read());
+    }
+
+    new_pml4
+}
+
+pub unsafe fn clone_user_address_space(src_pml4: usize) -> usize {
+    let new_pml4 = clone_kernel_address_space();
+    let src_pml4_ptr = p2v(src_pml4) as *const u64;
+    let dst_pml4_ptr = p2v(new_pml4) as *mut u64;
+
+    for pml4_i in 0..256usize {
+        let src_pml4e = src_pml4_ptr.add(pml4_i).read();
+        if (src_pml4e & PTE_PRESENT) == 0 {
+            continue;
+        }
+
+        let new_pdpt = alloc_table();
+        let pml4_flags = src_pml4e & !PTE_ADDR_MASK;
+        dst_pml4_ptr
+            .add(pml4_i)
+            .write((new_pdpt as u64) | pml4_flags);
+
+        let src_pdpt = p2v((src_pml4e & PTE_ADDR_MASK) as usize) as *const u64;
+        let dst_pdpt = p2v(new_pdpt) as *mut u64;
+
+        for pdpt_i in 0..512usize {
+            let src_pdpte = src_pdpt.add(pdpt_i).read();
+            if (src_pdpte & PTE_PRESENT) == 0 {
+                continue;
+            }
+
+            let new_pd = alloc_table();
+            let pdpt_flags = src_pdpte & !PTE_ADDR_MASK;
+            dst_pdpt.add(pdpt_i).write((new_pd as u64) | pdpt_flags);
+
+            let src_pd = p2v((src_pdpte & PTE_ADDR_MASK) as usize) as *const u64;
+            let dst_pd = p2v(new_pd) as *mut u64;
+
+            for pd_i in 0..512usize {
+                let src_pde = src_pd.add(pd_i).read();
+                if (src_pde & PTE_PRESENT) == 0 {
+                    continue;
+                }
+                if (src_pde & PTE_HUGE) != 0 {
+                    dst_pd.add(pd_i).write(src_pde);
+                    continue;
+                }
+
+                let new_pt = alloc_table();
+                let pd_flags = src_pde & !PTE_ADDR_MASK;
+                dst_pd.add(pd_i).write((new_pt as u64) | pd_flags);
+
+                let src_pt = p2v((src_pde & PTE_ADDR_MASK) as usize) as *const u64;
+                let dst_pt = p2v(new_pt) as *mut u64;
+
+                for pt_i in 0..512usize {
+                    let src_pte = src_pt.add(pt_i).read();
+                    if (src_pte & PTE_PRESENT) == 0 {
+                        continue;
+                    }
+
+                    let src_frame = (src_pte & PTE_ADDR_MASK) as usize;
+                    let new_frame = alloc_frame();
+                    if new_frame == 0 {
+                        panic!("fork: OOM cloning user address space");
+                    }
+                    core::ptr::copy_nonoverlapping(
+                        p2v(src_frame) as *const u8,
+                        p2v(new_frame) as *mut u8,
+                        4096,
+                    );
+                    let pte_flags = src_pte & !PTE_ADDR_MASK;
+                    dst_pt.add(pt_i).write((new_frame as u64) | pte_flags);
+                }
+            }
+        }
     }
 
     new_pml4

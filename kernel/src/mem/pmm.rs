@@ -54,7 +54,7 @@ pub unsafe fn init(boot_info: *const CoreOS_BootInfo, kernel_end_phys: usize) {
             npages
         );
         for f in start_frame..start_frame + frame_count {
-            if f < MAX_FRAMES {
+            if f < MAX_FRAMES && !is_free(f) {
                 set_free(f);
                 FREE_FRAMES += 1;
                 TOTAL_FRAMES += 1;
@@ -71,8 +71,10 @@ pub unsafe fn init(boot_info: *const CoreOS_BootInfo, kernel_end_phys: usize) {
             FREE_FRAMES -= 1;
         }
     }
-
-    set_used(0); // null page always used
+    if is_free(0) {
+        set_used(0); // null page always used
+        FREE_FRAMES = FREE_FRAMES.saturating_sub(1);
+    }
     crate::serial_fmt!("pmm::init kernel frames reserved\n");
 
     crate::dbg_log!(
@@ -149,6 +151,7 @@ pub unsafe fn free_frame(phys_addr: usize) {
 /// Mark a specific physical frame (by address) as used in the bitmap.
 /// Used by the ELF loader to reserve target virtual addresses.
 /// Has no effect if the frame is already marked used.
+#[allow(dead_code)]
 pub unsafe fn mark_frame_used(phys_addr: usize) {
     let f = phys_addr / PAGE_SIZE;
     if f == 0 || f >= MAX_FRAMES {
