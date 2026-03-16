@@ -52,4 +52,4 @@ impl RamFS {
     }
 }
 
-pub static mut FILESYSTEM: Option<RamFS> = None;
+pub static FILESYSTEM: crate::sync::SpinLock<Option<RamFS>> = crate::sync::SpinLock::new(None);

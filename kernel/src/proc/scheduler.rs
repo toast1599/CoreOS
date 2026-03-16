@@ -41,8 +41,8 @@ unsafe fn try_switch() {
     if IN_SYSCALL.load(Ordering::Relaxed) {
         return;
     }
-    if let Some((old_rsp_ptr, new_rsp)) = super::task::next_task_switch() {
-        switch_to(old_rsp_ptr, new_rsp);
+    if let Some((old_rsp_ptr, new_rsp, new_pml4)) = super::task::next_task_switch() {
+        switch_to(old_rsp_ptr, new_rsp, new_pml4);
     }
 }
 
@@ -64,8 +64,8 @@ unsafe fn try_switch() {
 /// for a brand-new task, or the instruction after `switch_to` for a
 /// previously-running task.
 #[unsafe(naked)]
-unsafe extern "C" fn switch_to(old_rsp: *mut usize, new_rsp: usize) {
-    // rdi = old_rsp pointer, rsi = new_rsp value  (System V ABI)
+unsafe extern "C" fn switch_to(old_rsp: *mut usize, new_rsp: usize, new_pml4: usize) {
+    // rdi = old_rsp pointer, rsi = new_rsp value, rdx = new_pml4  (System V ABI)
     core::arch::naked_asm!(
         // Save callee-saved registers onto current stack
         "push rbp",
@@ -76,6 +76,8 @@ unsafe extern "C" fn switch_to(old_rsp: *mut usize, new_rsp: usize) {
         "push r15",
         // Save current rsp into *old_rsp
         "mov [rdi], rsp",
+        // Restore the target task's address space
+        "mov cr3, rdx",
         // Switch to new stack
         "mov rsp, rsi",
         // Restore callee-saved registers from new stack

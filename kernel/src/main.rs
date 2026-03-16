@@ -17,7 +17,9 @@ mod boot;
 mod drivers;
 mod hw; // Centralized hardware (PIC, PIT, PS2, RTC, etc.)
 mod mem;
+mod sync;
 mod syscall;
+mod usercopy;
 
 // --- Memory & Execution ---
 mod proc;
@@ -192,7 +194,7 @@ pub unsafe extern "win64" fn _start(boot_info_phys: *const boot::CoreOS_BootInfo
     // -----------------------------------------------------------------------
     // 4. Kernel subsystems
     // -----------------------------------------------------------------------
-    fs::FILESYSTEM = Some(fs::RamFS::new());
+    *fs::FILESYSTEM.lock() = Some(fs::RamFS::new());
 
     // Load saved ELF bytes into RamFS now that heap is available
     if ELF_LEN > 0 {
@@ -205,7 +207,8 @@ pub unsafe extern "win64" fn _start(boot_info_phys: *const boot::CoreOS_BootInfo
             ELF_BUF[3]
         );
         let name: &[char] = &['t', 'e', 's', 't'];
-        if let Some(ref mut fs) = fs::FILESYSTEM {
+        let mut fs_guard = fs::FILESYSTEM.lock();
+        if let Some(ref mut fs) = *fs_guard {
             if fs.create(name) {
                 if let Some(f) = fs.find_mut(name) {
                     f.data.extend_from_slice(&ELF_BUF[..ELF_LEN]);

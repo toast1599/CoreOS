@@ -104,19 +104,14 @@ const PH_MEMSZ: usize = 40;
 // Public loader entry point
 // ---------------------------------------------------------------------------
 
-/// Load an ELF64 executable from `data` into physical memory.
+/// Load an ELF64 executable from `data` into `pml4`.
 ///
 /// Allocates pages via the PMM for every PT_LOAD segment, copies the file
 /// bytes in, and zeroes the BSS gap (memsz > filesz).
 ///
 /// Returns the entry point virtual address on success.
 ///
-/// # Safety
-/// Writes directly to physical addresses derived from PMM frames.
-/// The caller must ensure the address space is identity-mapped for the
-/// segment virtual addresses (i.e. link your test binary with `-Ttext 0x400000`
-/// or similar, within the first 4 GB identity map).
-pub unsafe fn load(data: &[u8]) -> Result<u64, ElfError> {
+pub unsafe fn load_into(pml4: usize, data: &[u8]) -> Result<u64, ElfError> {
     // -----------------------------------------------------------------------
     // 1. Validate header
     // -----------------------------------------------------------------------
@@ -171,7 +166,7 @@ pub unsafe fn load(data: &[u8]) -> Result<u64, ElfError> {
         let ph_start = phoff + i * phentsize;
 
         if ph_start + phentsize > data.len() {
-            break;
+            return Err(ElfError::TooSmall);
         }
 
         let ph = &data[ph_start..ph_start + phentsize];
@@ -185,6 +180,12 @@ pub unsafe fn load(data: &[u8]) -> Result<u64, ElfError> {
         if p_type != PT_LOAD || p_memsz == 0 {
             continue;
         }
+        if p_offset
+            .checked_add(p_filesz)
+            .is_none_or(|end| end > data.len())
+        {
+            return Err(ElfError::TooSmall);
+        }
 
         crate::dbg_log!(
             "ELF",
@@ -194,45 +195,63 @@ pub unsafe fn load(data: &[u8]) -> Result<u64, ElfError> {
             p_memsz
         );
 
-        // -----------------------------------------------------------------------
-        // 3. Allocate pages to cover [p_vaddr .. p_vaddr + p_memsz)
-        //
-        // Because the kernel identity-maps the first 4 GB, physical == virtual
-        // for any address in that range. We allocate contiguous-enough frames by
-        // iterating page-aligned addresses and calling alloc_frame() for each.
-        //
-        // NOTE: alloc_frame() picks the first free frame, which may not be
-        // contiguous with the previous one. For a flat identity map this is fine
-        // because we write to the virtual address directly, not to the frame
-        // address returned. For proper per-process page tables you will replace
-        // this with map_page(proc_pml4, vaddr, frame, flags).
-        // -----------------------------------------------------------------------
+        // Map each segment page into the target address space and copy through
+        // the kernel direct map so we do not depend on the current CR3.
         let page_start = p_vaddr & !(PAGE_SIZE - 1);
         let page_end = (p_vaddr + p_memsz + PAGE_SIZE - 1) & !(PAGE_SIZE - 1);
         let mut page = page_start;
 
         while page < page_end {
-            // In our identity-mapped setup, virt == phys for the first 4 GB.
-            // We must mark these frames as used in the PMM so no future
-            // allocator (heap, task stack, another ELF load) clobbers them.
-            crate::mem::pmm::mark_frame_used(page);
-
-            // Zero the page so BSS and inter-segment gaps are clean.
-            core::ptr::write_bytes(page as *mut u8, 0, PAGE_SIZE);
+            let frame = crate::mem::pmm::alloc_frame();
+            if frame == 0 {
+                return Err(ElfError::OomLoadingSegment);
+            }
+            crate::arch::paging::map_page_in(
+                pml4,
+                page,
+                frame,
+                crate::arch::paging::MapFlags {
+                    writable: true,
+                    user: true,
+                    executable: true,
+                },
+            );
+            core::ptr::write_bytes(crate::arch::paging::p2v(frame) as *mut u8, 0, PAGE_SIZE);
             page += PAGE_SIZE;
         }
 
-        // -----------------------------------------------------------------------
-        // 4. Copy file bytes into virtual address
-        // -----------------------------------------------------------------------
         if p_filesz > 0 {
             let src = &data[p_offset..p_offset + p_filesz];
-            let dst = p_vaddr as *mut u8;
-            core::ptr::copy_nonoverlapping(src.as_ptr(), dst, p_filesz);
+            let mut copied = 0usize;
+            let mut cur_page = page_start;
+
+            while copied < p_filesz {
+                let page_off = if cur_page == page_start {
+                    p_vaddr & (PAGE_SIZE - 1)
+                } else {
+                    0
+                };
+                let remaining = p_filesz - copied;
+                let chunk = remaining.min(PAGE_SIZE - page_off);
+                let frame = crate::arch::paging::translate_page(pml4, cur_page)
+                    .ok_or(ElfError::OomLoadingSegment)?;
+                let dst = (crate::arch::paging::p2v(frame) + page_off) as *mut u8;
+                core::ptr::copy_nonoverlapping(src.as_ptr().add(copied), dst, chunk);
+                copied += chunk;
+                cur_page += PAGE_SIZE;
+            }
         }
 
-        // BSS gap (memsz > filesz) is already zeroed by the write_bytes above.
-        let first4 = core::slice::from_raw_parts(p_vaddr as *const u8, 4.min(p_filesz));
+        let first4 = if p_filesz == 0 {
+            &[][..]
+        } else {
+            let frame = crate::arch::paging::translate_page(pml4, page_start)
+                .ok_or(ElfError::OomLoadingSegment)?;
+            core::slice::from_raw_parts(
+                (crate::arch::paging::p2v(frame) + (p_vaddr & (PAGE_SIZE - 1))) as *const u8,
+                4.min(p_filesz),
+            )
+        };
         crate::dbg_log!(
             "ELF",
             "segment loaded at vaddr={:#x} first_bytes={:x?}",

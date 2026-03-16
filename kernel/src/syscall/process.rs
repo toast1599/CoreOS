@@ -9,10 +9,13 @@ pub unsafe fn syscall_exec(path_ptr: u64, path_len: u64) -> u64 {
     if path_len == 0 || path_len > 64 {
         return 0;
     }
-    let path_bytes = core::slice::from_raw_parts(path_ptr as *const u8, path_len as usize);
+    let mut raw = [0u8; 64];
+    if crate::usercopy::copy_from_user(&mut raw[..path_len as usize], path_ptr).is_err() {
+        return 0;
+    }
     let mut name_buf = ['\0'; 64];
-    for (i, &b) in path_bytes.iter().enumerate() {
-        name_buf[i] = b as char;
+    for i in 0..path_len as usize {
+        name_buf[i] = raw[i] as char;
     }
     let name = &name_buf[..path_len as usize];
     let elf_bytes = match fs::fs_clone_by_name(name) {
@@ -28,10 +31,17 @@ pub unsafe fn syscall_exec(path_ptr: u64, path_len: u64) -> u64 {
 
 pub unsafe fn syscall_waitpid(pid: u64) -> u64 {
     let target_pid = pid as usize;
+    let self_slot = match task::current_task_slot() {
+        Some(s) => s,
+        None => return u64::MAX,
+    };
     let mut slot = None;
     for i in 0..8 {
         if let Some(ref p) = proc::PROCESSES[i] {
             if p.pid == target_pid {
+                if i == self_slot {
+                    return u64::MAX;
+                }
                 slot = Some(i);
                 break;
             }
@@ -76,7 +86,17 @@ pub unsafe fn syscall_brk(addr: u64) -> u64 {
             crate::dbg_log!("BRK", "OOM");
             return current_brk as u64;
         }
-        paging::map_page(page, frame);
+        paging::map_page_in(
+            task::current_pml4(),
+            page,
+            frame,
+            paging::MapFlags {
+                writable: true,
+                user: true,
+                executable: false,
+            },
+        );
+        core::ptr::write_bytes(paging::p2v(frame) as *mut u8, 0, 0x1000);
         page += 0x1000;
     }
 
@@ -88,8 +108,9 @@ pub unsafe fn syscall_boottime(buf_ptr: u64, buf_len: u64) -> u64 {
     let report = crate::bench::report();
     let bytes = report.as_bytes();
     let count = (buf_len as usize).min(bytes.len());
-    let buf = buf_ptr as *mut u8;
-    core::ptr::copy_nonoverlapping(bytes.as_ptr(), buf, count);
+    if crate::usercopy::copy_to_user(buf_ptr, &bytes[..count]).is_err() {
+        return u64::MAX;
+    }
     count as u64
 }
 

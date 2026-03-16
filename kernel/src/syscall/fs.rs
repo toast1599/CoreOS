@@ -8,7 +8,8 @@ use crate::hw::kbd_buffer;
 // ---------------------------------------------------------------------------
 
 pub unsafe fn fs_find_idx(name: &[char]) -> Option<usize> {
-    crate::fs::FILESYSTEM
+    let fs_guard = crate::fs::FILESYSTEM.lock();
+    fs_guard
         .as_ref()?
         .files
         .iter()
@@ -16,14 +17,16 @@ pub unsafe fn fs_find_idx(name: &[char]) -> Option<usize> {
 }
 
 pub unsafe fn fs_file_size(file_idx: usize) -> usize {
-    match crate::fs::FILESYSTEM.as_ref() {
+    let fs_guard = crate::fs::FILESYSTEM.lock();
+    match fs_guard.as_ref() {
         Some(fs) if file_idx < fs.files.len() => fs.files[file_idx].data.len(),
         _ => 0,
     }
 }
 
 pub unsafe fn fs_read(file_idx: usize, offset: usize, buf: *mut u8, count: usize) -> usize {
-    let fs = match crate::fs::FILESYSTEM.as_ref() {
+    let fs_guard = crate::fs::FILESYSTEM.lock();
+    let fs = match fs_guard.as_ref() {
         Some(f) => f,
         None => return 0,
     };
@@ -41,7 +44,8 @@ pub unsafe fn fs_read(file_idx: usize, offset: usize, buf: *mut u8, count: usize
 }
 
 pub unsafe fn fs_clone_by_name(name: &[char]) -> Option<alloc::vec::Vec<u8>> {
-    let fs = crate::fs::FILESYSTEM.as_ref()?;
+    let fs_guard = crate::fs::FILESYSTEM.lock();
+    let fs = fs_guard.as_ref()?;
     let file = fs.files.iter().find(|f| f.name.as_slice() == name)?;
     Some(file.data.clone())
 }
@@ -51,8 +55,11 @@ pub unsafe fn fs_clone_by_name(name: &[char]) -> Option<alloc::vec::Vec<u8>> {
 // ---------------------------------------------------------------------------
 
 pub unsafe fn syscall_write(_fd: u64, buf_ptr: u64, count: u64) -> u64 {
-    let buf = buf_ptr as *const u8;
     let len = count as usize;
+    if !crate::usercopy::user_range_ok(buf_ptr, len) {
+        return u64::MAX;
+    }
+    let buf = buf_ptr as *const u8;
     for i in 0..len {
         let b = *buf.add(i);
         serial::write_byte(b);
@@ -66,6 +73,9 @@ pub unsafe fn syscall_read(fd: u64, buf_ptr: u64, count: u64) -> u64 {
     let count = count as usize;
     if count == 0 {
         return 0;
+    }
+    if !crate::usercopy::user_range_ok(buf_ptr, count) {
+        return u64::MAX;
     }
 
     if fd == 0 {
@@ -102,10 +112,13 @@ pub unsafe fn syscall_open(path_ptr: u64, path_len: u64) -> u64 {
     if path_len == 0 || path_len > 64 {
         return u64::MAX;
     }
-    let path_bytes = core::slice::from_raw_parts(path_ptr as *const u8, path_len as usize);
+    let mut raw = [0u8; 64];
+    if crate::usercopy::copy_from_user(&mut raw[..path_len as usize], path_ptr).is_err() {
+        return u64::MAX;
+    }
     let mut name_buf = ['\0'; 64];
-    for (i, &b) in path_bytes.iter().enumerate() {
-        name_buf[i] = b as char;
+    for i in 0..path_len as usize {
+        name_buf[i] = raw[i] as char;
     }
     let name = &name_buf[..path_len as usize];
     let file_idx = match fs_find_idx(name) {
@@ -129,7 +142,11 @@ pub unsafe fn syscall_fsize(fd: u64) -> u64 {
 }
 
 pub unsafe fn syscall_ls(buf_ptr: u64, buf_len: u64) -> u64 {
-    let fs = match crate::fs::FILESYSTEM.as_ref() {
+    if !crate::usercopy::user_range_ok(buf_ptr, buf_len as usize) {
+        return u64::MAX;
+    }
+    let fs_guard = crate::fs::FILESYSTEM.lock();
+    let fs = match fs_guard.as_ref() {
         Some(f) => f,
         None => return 0,
     };
@@ -156,13 +173,17 @@ pub unsafe fn syscall_touch(name_ptr: u64, name_len: u64) -> u64 {
     if name_len == 0 || name_len > 64 {
         return u64::MAX;
     }
-    let bytes = core::slice::from_raw_parts(name_ptr as *const u8, name_len as usize);
+    let mut raw = [0u8; 64];
+    if crate::usercopy::copy_from_user(&mut raw[..name_len as usize], name_ptr).is_err() {
+        return u64::MAX;
+    }
     let mut name_buf = ['\0'; 64];
-    for (i, &b) in bytes.iter().enumerate() {
-        name_buf[i] = b as char;
+    for i in 0..name_len as usize {
+        name_buf[i] = raw[i] as char;
     }
     let name = &name_buf[..name_len as usize];
-    match crate::fs::FILESYSTEM.as_mut() {
+    let mut fs_guard = crate::fs::FILESYSTEM.lock();
+    match fs_guard.as_mut() {
         Some(fs) => {
             if fs.create(name) {
                 0
@@ -178,13 +199,17 @@ pub unsafe fn syscall_rm(name_ptr: u64, name_len: u64) -> u64 {
     if name_len == 0 || name_len > 64 {
         return u64::MAX;
     }
-    let bytes = core::slice::from_raw_parts(name_ptr as *const u8, name_len as usize);
+    let mut raw = [0u8; 64];
+    if crate::usercopy::copy_from_user(&mut raw[..name_len as usize], name_ptr).is_err() {
+        return u64::MAX;
+    }
     let mut name_buf = ['\0'; 64];
-    for (i, &b) in bytes.iter().enumerate() {
-        name_buf[i] = b as char;
+    for i in 0..name_len as usize {
+        name_buf[i] = raw[i] as char;
     }
     let name = &name_buf[..name_len as usize];
-    match crate::fs::FILESYSTEM.as_mut() {
+    let mut fs_guard = crate::fs::FILESYSTEM.lock();
+    match fs_guard.as_mut() {
         Some(fs) => {
             if fs.remove(name) {
                 0
@@ -200,15 +225,25 @@ pub unsafe fn syscall_write_file(name_ptr: u64, name_len: u64, args_ptr: u64) ->
     if name_len == 0 || name_len > 64 {
         return u64::MAX;
     }
+    if !crate::usercopy::user_range_ok(args_ptr, 16) {
+        return u64::MAX;
+    }
     let data_ptr = (args_ptr as *const u64).read();
     let data_len = (args_ptr as *const u64).add(1).read() as usize;
-    let bytes = core::slice::from_raw_parts(name_ptr as *const u8, name_len as usize);
+    let mut raw = [0u8; 64];
+    if crate::usercopy::copy_from_user(&mut raw[..name_len as usize], name_ptr).is_err() {
+        return u64::MAX;
+    }
+    if !crate::usercopy::user_range_ok(data_ptr, data_len) {
+        return u64::MAX;
+    }
     let mut name_buf = ['\0'; 64];
-    for (i, &b) in bytes.iter().enumerate() {
-        name_buf[i] = b as char;
+    for i in 0..name_len as usize {
+        name_buf[i] = raw[i] as char;
     }
     let name = &name_buf[..name_len as usize];
-    let fs = match crate::fs::FILESYSTEM.as_mut() {
+    let mut fs_guard = crate::fs::FILESYSTEM.lock();
+    let fs = match fs_guard.as_mut() {
         Some(f) => f,
         None => return u64::MAX,
     };
@@ -226,15 +261,25 @@ pub unsafe fn syscall_push_file(name_ptr: u64, name_len: u64, args_ptr: u64) -> 
     if name_len == 0 || name_len > 64 {
         return u64::MAX;
     }
+    if !crate::usercopy::user_range_ok(args_ptr, 16) {
+        return u64::MAX;
+    }
     let data_ptr = (args_ptr as *const u64).read();
     let data_len = (args_ptr as *const u64).add(1).read() as usize;
-    let bytes = core::slice::from_raw_parts(name_ptr as *const u8, name_len as usize);
+    let mut raw = [0u8; 64];
+    if crate::usercopy::copy_from_user(&mut raw[..name_len as usize], name_ptr).is_err() {
+        return u64::MAX;
+    }
+    if !crate::usercopy::user_range_ok(data_ptr, data_len) {
+        return u64::MAX;
+    }
     let mut name_buf = ['\0'; 64];
-    for (i, &b) in bytes.iter().enumerate() {
-        name_buf[i] = b as char;
+    for i in 0..name_len as usize {
+        name_buf[i] = raw[i] as char;
     }
     let name = &name_buf[..name_len as usize];
-    let fs = match crate::fs::FILESYSTEM.as_mut() {
+    let mut fs_guard = crate::fs::FILESYSTEM.lock();
+    let fs = match fs_guard.as_mut() {
         Some(f) => f,
         None => return u64::MAX,
     };

@@ -44,11 +44,12 @@ pub unsafe fn add_task(entry: fn()) -> bool {
     };
 
     let stack_pages = 4;
-    let stack_base = alloc_frames(stack_pages);
-    if stack_base == 0 {
+    let stack_phys = alloc_frames(stack_pages);
+    if stack_phys == 0 {
         crate::dbg_log!("TASK", "OOM allocating stack");
         return false;
     }
+    let stack_base = crate::arch::paging::p2v(stack_phys);
 
     let stack_top = stack_base + stack_pages * PAGE_SIZE;
     let mut sp = stack_top;
@@ -82,7 +83,7 @@ pub unsafe fn add_task(entry: fn()) -> bool {
         "created task {} in slot {} (stack={:#x})",
         id,
         slot,
-        stack_base
+        stack_phys
     );
     true
 }
@@ -96,7 +97,14 @@ pub unsafe fn current_task_slot() -> Option<usize> {
     Some(CURRENT)
 }
 
-pub unsafe fn next_task_switch() -> Option<(*mut usize, usize)> {
+pub unsafe fn current_pml4() -> usize {
+    TASKS[CURRENT]
+        .as_ref()
+        .map(|t| t.pml4)
+        .unwrap_or(crate::arch::paging::KERNEL_PML4)
+}
+
+pub unsafe fn next_task_switch() -> Option<(*mut usize, usize, usize)> {
     static mut DEAD_RSP: usize = 0;
 
     crate::serial_fmt!(
@@ -151,7 +159,11 @@ pub unsafe fn next_task_switch() -> Option<(*mut usize, usize)> {
     crate::arch::gdt::TSS.rsp0 = next_stack_top as u64;
     crate::arch::gdt::TSS_RSP0 = next_stack_top as u64;
 
-    Some((old_rsp_ptr, TASKS[next_idx].as_ref().unwrap().rsp))
+    Some((
+        old_rsp_ptr,
+        TASKS[next_idx].as_ref().unwrap().rsp,
+        TASKS[next_idx].as_ref().unwrap().pml4,
+    ))
 }
 pub unsafe fn init_main_task(stack_base: usize) {
     TASKS[0] = Some(Task {
@@ -179,11 +191,12 @@ pub unsafe fn spawn_user_task(entry: u64, stack_top: u64, pml4: usize) -> Option
 
     // Allocate a kernel stack for this task's context switch frame.
     let stack_pages = 4;
-    let stack_base = alloc_frames(stack_pages);
-    if stack_base == 0 {
+    let stack_phys = alloc_frames(stack_pages);
+    if stack_phys == 0 {
         crate::dbg_log!("TASK", "OOM allocating user task kernel stack");
         return None;
     }
+    let stack_base = crate::arch::paging::p2v(stack_phys);
 
     // We set rsp to the top of the kernel stack.
     // The task will be switched to via switch_to, which expects
@@ -233,7 +246,7 @@ pub unsafe fn spawn_user_task(entry: u64, stack_top: u64, pml4: usize) -> Option
         "spawned user task {} in slot {} (kstack={:#x} entry={:#x} ustack={:#x})",
         id,
         slot,
-        stack_base,
+        stack_phys,
         entry,
         stack_top
     );

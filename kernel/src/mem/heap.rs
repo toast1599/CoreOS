@@ -52,6 +52,22 @@ fn class_for(size: usize) -> Option<usize> {
         .map(|(i, _)| i)
 }
 
+#[inline]
+unsafe fn interrupts_enabled() -> bool {
+    let rflags: u64;
+    core::arch::asm!("pushfq", "pop {}", out(reg) rflags, options(nomem, preserves_flags));
+    (rflags & (1 << 9)) != 0
+}
+
+#[inline]
+unsafe fn restore_interrupts(enabled: bool) {
+    if enabled {
+        core::arch::asm!("sti", options(nomem, nostack));
+    } else {
+        core::arch::asm!("cli", options(nomem, nostack));
+    }
+}
+
 unsafe fn new_slab(class_idx: usize) -> Option<&'static mut SlabHeader> {
     let slot_size = SIZE_CLASSES[class_idx];
     let header = SLABS[class_idx].iter_mut().find(|h| h.is_empty_slot())?;
@@ -95,6 +111,7 @@ unsafe impl GlobalAlloc for SlabAllocator {
             .max(core::mem::size_of::<usize>());
 
         if let Some(ci) = class_for(size) {
+            let irq_was_enabled = interrupts_enabled();
             core::arch::asm!("cli", options(nomem, nostack));
             let res = (|| {
                 let slab = SLABS[ci]
@@ -117,13 +134,14 @@ unsafe impl GlobalAlloc for SlabAllocator {
                 core::ptr::write_bytes(slot as *mut u8, 0, SIZE_CLASSES[ci]);
                 slot as *mut u8
             })();
-            core::arch::asm!("sti", options(nomem, nostack));
+            restore_interrupts(irq_was_enabled);
             res
         } else {
             let pages_needed = (size + PAGE_SIZE - 1) / PAGE_SIZE;
+            let irq_was_enabled = interrupts_enabled();
             core::arch::asm!("cli", options(nomem, nostack));
             let first = super::pmm::alloc_frames(pages_needed);
-            core::arch::asm!("sti", options(nomem, nostack));
+            restore_interrupts(irq_was_enabled);
             if first == 0 {
                 return null_mut();
             }
@@ -143,6 +161,7 @@ unsafe impl GlobalAlloc for SlabAllocator {
         if let Some(ci) = class_for(size) {
             let addr_virt = ptr as usize;
             let addr_phys = crate::arch::amd64::paging::v2p(addr_virt);
+            let irq_was_enabled = interrupts_enabled();
             core::arch::asm!("cli", options(nomem, nostack));
             if let Some(slab) = SLABS[ci]
                 .iter_mut()
@@ -159,16 +178,16 @@ unsafe impl GlobalAlloc for SlabAllocator {
             } else {
                 crate::dbg_log!("SLAB", "dealloc: ptr {:#x} not found in slabs!", addr_virt);
             }
-            core::arch::asm!("sti", options(nomem, nostack));
+            restore_interrupts(irq_was_enabled);
         } else {
             let pages_needed = (size + PAGE_SIZE - 1) / PAGE_SIZE;
             let addr_phys = crate::arch::amd64::paging::v2p(ptr as usize);
+            let irq_was_enabled = interrupts_enabled();
             core::arch::asm!("cli", options(nomem, nostack));
             for i in 0..pages_needed {
                 free_frame(addr_phys + i * PAGE_SIZE);
             }
-            core::arch::asm!("sti", options(nomem, nostack));
+            restore_interrupts(irq_was_enabled);
         }
     }
 }
-

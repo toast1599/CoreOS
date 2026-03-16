@@ -27,13 +27,16 @@ pub unsafe fn run_shell(boot_info: *const boot::CoreOS_BootInfo) -> ! {
 
     loop {
         let name: &[char] = &['t', 'e', 's', 't'];
-        let mut elf_data = None;
-
-        if let Some(ref fs) = fs::FILESYSTEM {
-            if let Some(f) = fs.find(name) {
-                elf_data = Some(f.data.clone());
+        let elf_data = {
+            let mut elf = None;
+            let fs_guard = fs::FILESYSTEM.lock();
+            if let Some(ref fs) = *fs_guard {
+                if let Some(f) = fs.find(name) {
+                    elf = Some(f.data.clone());
+                }
             }
-        }
+            elf
+        };
 
         if let Some(data) = elf_data {
             let (pid, slot) = crate::proc::exec::exec_as_task(&data);
