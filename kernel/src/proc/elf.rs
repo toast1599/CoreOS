@@ -202,21 +202,23 @@ pub unsafe fn load_into(pml4: usize, data: &[u8]) -> Result<u64, ElfError> {
         let mut page = page_start;
 
         while page < page_end {
-            let frame = crate::mem::pmm::alloc_frame();
-            if frame == 0 {
-                return Err(ElfError::OomLoadingSegment);
+            if crate::arch::paging::translate_page(pml4, page).is_none() {
+                let frame = crate::mem::pmm::alloc_frame();
+                if frame == 0 {
+                    return Err(ElfError::OomLoadingSegment);
+                }
+                crate::arch::paging::map_page_in(
+                    pml4,
+                    page,
+                    frame,
+                    crate::arch::paging::MapFlags {
+                        writable: true,
+                        user: true,
+                        executable: true,
+                    },
+                );
+                core::ptr::write_bytes(crate::arch::paging::p2v(frame) as *mut u8, 0, PAGE_SIZE);
             }
-            crate::arch::paging::map_page_in(
-                pml4,
-                page,
-                frame,
-                crate::arch::paging::MapFlags {
-                    writable: true,
-                    user: true,
-                    executable: true,
-                },
-            );
-            core::ptr::write_bytes(crate::arch::paging::p2v(frame) as *mut u8, 0, PAGE_SIZE);
             page += PAGE_SIZE;
         }
 

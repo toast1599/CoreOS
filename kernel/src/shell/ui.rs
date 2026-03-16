@@ -1,8 +1,8 @@
 use crate::boot;
-use crate::fs;
 use crate::drivers::vga;
 use crate::hw;
 use crate::proc;
+use crate::vfs;
 use core::fmt::Write;
 
 pub unsafe fn run_shell(boot_info: *const boot::CoreOS_BootInfo) -> ! {
@@ -27,16 +27,7 @@ pub unsafe fn run_shell(boot_info: *const boot::CoreOS_BootInfo) -> ! {
 
     loop {
         let name: &[char] = &['t', 'e', 's', 't'];
-        let elf_data = {
-            let mut elf = None;
-            let fs_guard = fs::FILESYSTEM.lock();
-            if let Some(ref fs) = *fs_guard {
-                if let Some(f) = fs.find(name) {
-                    elf = Some(f.data.clone());
-                }
-            }
-            elf
-        };
+        let elf_data = vfs::clone_bytes(name);
 
         if let Some(data) = elf_data {
             let (pid, slot) = crate::proc::exec::exec_as_task(&data);

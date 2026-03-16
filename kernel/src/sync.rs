@@ -20,10 +20,8 @@ impl<T> SpinLock<T> {
 
     pub fn lock(&self) -> SpinLockGuard<'_, T> {
         loop {
-            let irq_was_enabled = interrupts_enabled();
-            unsafe {
-                core::arch::asm!("cli", options(nomem, nostack));
-            }
+            let irq_was_enabled = unsafe { crate::arch::cpu::interrupts_enabled() };
+            unsafe { crate::arch::cpu::cli() };
 
             if self
                 .held
@@ -36,7 +34,7 @@ impl<T> SpinLock<T> {
                 };
             }
 
-            restore_interrupts(irq_was_enabled);
+            unsafe { crate::arch::cpu::restore_interrupts(irq_was_enabled) };
             while self.held.load(Ordering::Relaxed) {
                 spin_loop();
             }
@@ -66,26 +64,6 @@ impl<T> DerefMut for SpinLockGuard<'_, T> {
 impl<T> Drop for SpinLockGuard<'_, T> {
     fn drop(&mut self) {
         self.lock.held.store(false, Ordering::Release);
-        restore_interrupts(self.irq_was_enabled);
-    }
-}
-
-#[inline]
-fn interrupts_enabled() -> bool {
-    let rflags: u64;
-    unsafe {
-        core::arch::asm!("pushfq", "pop {}", out(reg) rflags, options(nomem, preserves_flags));
-    }
-    (rflags & (1 << 9)) != 0
-}
-
-#[inline]
-fn restore_interrupts(enabled: bool) {
-    unsafe {
-        if enabled {
-            core::arch::asm!("sti", options(nomem, nostack));
-        } else {
-            core::arch::asm!("cli", options(nomem, nostack));
-        }
+        unsafe { crate::arch::cpu::restore_interrupts(self.irq_was_enabled) };
     }
 }

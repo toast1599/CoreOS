@@ -1,7 +1,11 @@
 use core::arch::global_asm;
 
 pub mod fs;
+pub mod io;
+pub mod mm;
 pub mod process;
+pub mod time;
+pub mod vfs;
 
 const MSR_EFER: u32 = 0xC000_0080;
 const MSR_STAR: u32 = 0xC000_0081;
@@ -142,10 +146,10 @@ pub extern "C" fn syscall_dispatch(
     frame: u64,
 ) -> u64 {
     match num {
-        0 => unsafe { fs::syscall_read(arg1, arg2, arg3) },
-        1 => unsafe { fs::syscall_write(arg1, arg2, arg3) },
-        19 => unsafe { fs::syscall_readv(arg1, arg2, arg3) },
-        3 => unsafe { fs::syscall_open(arg1, arg2) },
+        0 => unsafe { io::read(arg1, arg2, arg3) },
+        1 => unsafe { io::write(arg1, arg2, arg3) },
+        19 => unsafe { io::readv(arg1, arg2, arg3) },
+        3 => unsafe { vfs::open(arg1, arg2) },
         4 => unsafe {
             if crate::proc::close_fd(arg1 as usize) {
                 0
@@ -153,23 +157,23 @@ pub extern "C" fn syscall_dispatch(
                 u64::MAX
             }
         },
-        5 => unsafe { fs::syscall_fsize(arg1) },
-        20 => unsafe { fs::syscall_writev(arg1, arg2, arg3) },
+        5 => unsafe { vfs::fsize(arg1) },
+        20 => unsafe { io::writev(arg1, arg2, arg3) },
         22 => unsafe { process::syscall_pipe(arg1) },
-        16 => unsafe { fs::syscall_ioctl(arg1, arg2, arg3) },
-        29 => unsafe { fs::syscall_fstat(arg1, arg2) },
-        30 => unsafe { fs::syscall_lseek(arg1, arg2, arg3) },
-        6 => unsafe { fs::syscall_ls(arg1, arg2) },
-        7 => unsafe { fs::syscall_touch(arg1, arg2) },
-        8 => unsafe { fs::syscall_rm(arg1, arg2) },
-        9 => unsafe { fs::syscall_write_file(arg1, arg2, arg3) },
-        10 => unsafe { fs::syscall_push_file(arg1, arg2, arg3) },
-        12 => unsafe { process::syscall_brk(arg1) },
-        31 => unsafe { process::syscall_mmap(arg1) },
-        32 => unsafe { process::syscall_mprotect(arg1, arg2, arg3) },
-        33 => unsafe { process::syscall_munmap(arg1, arg2) },
+        16 => unsafe { io::ioctl(arg1, arg2, arg3) },
+        29 => unsafe { vfs::fstat(arg1, arg2) },
+        30 => unsafe { vfs::lseek(arg1, arg2, arg3) },
+        6 => unsafe { vfs::ls(arg1, arg2) },
+        7 => unsafe { vfs::touch(arg1, arg2) },
+        8 => unsafe { vfs::rm(arg1, arg2) },
+        9 => unsafe { vfs::write_file(arg1, arg2, arg3) },
+        10 => unsafe { vfs::push_file(arg1, arg2, arg3) },
+        12 => unsafe { mm::brk(arg1) },
+        31 => unsafe { mm::mmap(arg1) },
+        32 => unsafe { mm::mprotect(arg1, arg2, arg3) },
+        33 => unsafe { mm::munmap(arg1, arg2) },
         34 => unsafe { process::syscall_dup(arg1) },
-        35 => unsafe { process::syscall_nanosleep(arg1, arg2) },
+        35 => unsafe { time::nanosleep(arg1, arg2) },
         36 => crate::mem::pmm::free_bytes() as u64,
         292 => unsafe { process::syscall_dup3(arg1, arg2, arg3) },
         72 => unsafe { process::syscall_fcntl(arg1, arg2, arg3) },
@@ -177,30 +181,27 @@ pub extern "C" fn syscall_dispatch(
         57 => unsafe { process::syscall_exec(arg1, arg2) },
         60 => unsafe { process::syscall_exit(arg1) },
         61 => unsafe { process::syscall_waitpid(arg1) },
-        21 => crate::hw::pit::uptime_seconds(),
-        37 => crate::hw::pit::ticks(),
+        21 => time::uptime_seconds(),
+        37 => time::ticks(),
         23 => unsafe {
             crate::hw::reboot();
         },
         24 => panic!("user-requested panic via syscall"),
-        25 => unsafe { process::syscall_boottime(arg1, arg2) },
+        25 => unsafe { time::boottime(arg1, arg2) },
         26 => unsafe {
             crate::drivers::vga::console::clear_terminal_area();
             crate::drivers::vga::console::set_userspace_cursor(20, 120);
             0
         },
-        27 => {
-            crate::hw::pit::sleep_yield(arg1);
-            0
-        }
+        27 => time::sleep_ticks(arg1),
         28 => {
             crate::drivers::vga::console::set_font_scale(arg1 as usize);
             0
         }
         39 => unsafe { process::syscall_getpid() },
-        228 => unsafe { process::syscall_clock_gettime(arg1, arg2) },
-        257 => unsafe { fs::syscall_openat(arg1, arg2, arg3, arg4) },
-        262 => unsafe { fs::syscall_fstatat(arg1, arg2, arg3, arg4) },
+        228 => unsafe { time::clock_gettime(arg1, arg2) },
+        257 => unsafe { vfs::openat(arg1, arg2, arg3, arg4) },
+        262 => unsafe { vfs::fstatat(arg1, arg2, arg3, arg4) },
         _ => {
             crate::dbg_log!("SYSCALL", "unhandled syscall {}", num);
             u64::MAX

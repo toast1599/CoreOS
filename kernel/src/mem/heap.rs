@@ -54,18 +54,12 @@ fn class_for(size: usize) -> Option<usize> {
 
 #[inline]
 unsafe fn interrupts_enabled() -> bool {
-    let rflags: u64;
-    core::arch::asm!("pushfq", "pop {}", out(reg) rflags, options(nomem, preserves_flags));
-    (rflags & (1 << 9)) != 0
+    crate::arch::cpu::interrupts_enabled()
 }
 
 #[inline]
 unsafe fn restore_interrupts(enabled: bool) {
-    if enabled {
-        core::arch::asm!("sti", options(nomem, nostack));
-    } else {
-        core::arch::asm!("cli", options(nomem, nostack));
-    }
+    crate::arch::cpu::restore_interrupts(enabled);
 }
 
 unsafe fn new_slab(class_idx: usize) -> Option<&'static mut SlabHeader> {

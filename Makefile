@@ -30,8 +30,7 @@ CFLAGS  = -target x86_64-pc-win32 \
 
 LDFLAGS = /subsystem:efi_application \
           /entry:efi_main \
-          /base:0x0 \
-          /align:4096
+          /base:0x0
 
 .PHONY: all clean run dirs
 
@@ -50,8 +49,7 @@ dirs:
 
 $(KERNEL_BIN): dirs $(USER_ELFS)
 	cd kernel && \
-	rustup override set nightly && \
-	cargo build --release \
+	cargo +nightly build --release \
 	    -Zbuild-std=core,alloc \
 	    --target x86_64-unknown-none
 	objcopy -O binary $(KERNEL_ELF) $(KERNEL_BIN)
