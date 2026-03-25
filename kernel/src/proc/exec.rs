@@ -6,7 +6,7 @@ const USER_STACK_TOP: usize = 0x0000_0000_8000_0000;
 
 /// Load `elf_data`, spawn a user task, register a process entry.
 /// Returns the PID on success, or 0 on failure.
-pub unsafe fn exec_as_task(elf_data: &[u8]) -> (usize, usize) {
+pub unsafe fn exec_as_task(elf_data: &[u8], name: &[char]) -> (usize, usize) {
     let new_pml4 = paging::clone_kernel_address_space();
     let entry = match super::elf::load_into(new_pml4, elf_data) {
         Ok(e) => e,
@@ -59,7 +59,7 @@ pub unsafe fn exec_as_task(elf_data: &[u8]) -> (usize, usize) {
     // -----------------------------------------------------------------------
     // 5. Register process entry
     // -----------------------------------------------------------------------
-    let pid = super::spawn(slot, new_pml4);
+    let pid = super::spawn_named(slot, new_pml4, name);
     crate::dbg_log!("EXEC", "process pid={} running in task slot={}", pid, slot);
     (pid, slot)
 }

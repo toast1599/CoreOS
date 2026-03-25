@@ -20,7 +20,9 @@ typedef unsigned long sigset_t;
 
 #define CLOCK_REALTIME 0
 #define CLOCK_MONOTONIC 1
+#define TIMER_ABSTIME 1
 #define AT_FDCWD (-100)
+#define AT_REMOVEDIR 0x200
 #define F_OK 0
 #define X_OK 1
 #define W_OK 2
@@ -38,10 +40,19 @@ typedef unsigned long sigset_t;
 #define F_GETFL 3
 #define F_SETFL 4
 #define F_DUPFD_CLOEXEC 1030
+#define ARCH_SET_FS 0x1002
+#define ARCH_GET_FS 0x1003
+#define GRND_NONBLOCK 0x0001
+#define GRND_RANDOM 0x0002
 
 struct timespec {
   time_t tv_sec;
   long tv_nsec;
+};
+
+struct timeval {
+  time_t tv_sec;
+  long tv_usec;
 };
 
 struct stat {
@@ -114,6 +125,8 @@ ssize_t read(int fd, void *buf, size_t count);
 ssize_t write(int fd, const void *buf, size_t count);
 ssize_t readv(int fd, const struct iovec *iov, int iovcnt);
 ssize_t writev(int fd, const struct iovec *iov, int iovcnt);
+ssize_t preadv(int fd, const struct iovec *iov, int iovcnt, off_t offset);
+ssize_t pwritev(int fd, const struct iovec *iov, int iovcnt, off_t offset);
 off_t lseek(int fd, off_t offset, int whence);
 int fstat(int fd, struct stat *st);
 int stat(const char *path, struct stat *st);
@@ -135,9 +148,15 @@ int getresuid(int *ruid, int *euid, int *suid);
 int getresgid(int *rgid, int *egid, int *sgid);
 char *getcwd(char *buf, size_t size);
 int chdir(const char *path);
+int truncate(const char *path, off_t length);
+int ftruncate(int fd, off_t length);
 int getrlimit(int resource, struct rlimit *rlim);
+int gettimeofday(struct timeval *tv, void *tz);
 int sigaltstack(const stack_t *ss, stack_t *old_ss);
 unsigned int umask(unsigned int mask);
+ssize_t pread(int fd, void *buf, size_t count, off_t offset);
+ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset);
+ssize_t sendfile(int out_fd, int in_fd, off_t *offset, size_t count);
 int pipe2(int pipefd[2], int flags);
 int faccessat(int dirfd, const char *path, int mode, int flags);
 int sysinfo(struct sysinfo *info);
@@ -146,11 +165,17 @@ int munmap(void *addr, size_t len);
 int mprotect(void *addr, size_t len, int prot);
 int nanosleep(const struct timespec *req, struct timespec *rem);
 int clock_gettime(int clockid, struct timespec *tp);
+int clock_nanosleep(int clockid, int flags, const struct timespec *req, struct timespec *rem);
 int dup(int fd);
 int dup2(int oldfd, int newfd);
 int dup3(int oldfd, int newfd, int flags);
 int fork(void);
 int openat(int dirfd, const char *path, int flags, ...);
+int unlinkat(int dirfd, const char *path, int flags);
+ssize_t readlink(const char *path, char *buf, size_t bufsiz);
+ssize_t readlinkat(int dirfd, const char *path, char *buf, size_t bufsiz);
+long getrandom(void *buf, size_t len, unsigned int flags);
+int arch_prctl(int code, unsigned long addr);
 int ioctl(int fd, unsigned long req, ...);
 int fcntl(int fd, int cmd, ...);
 int pipe(int pipefd[2]);
@@ -255,8 +280,30 @@ static inline int sys_fcntl(int fd, int cmd, long arg) {
   return (int)syscall3(COREOS_SYS_FCNTL, fd, cmd, arg);
 }
 
+static inline ssize_t sys_pread64(int fd, void *buf, size_t count, off_t offset) {
+  return syscall4(COREOS_SYS_PREAD64, fd, (long)buf, (long)count, (long)offset);
+}
+
+static inline ssize_t sys_pwrite64(int fd, const void *buf, size_t count, off_t offset) {
+  return syscall4(COREOS_SYS_PWRITE64, fd, (long)buf, (long)count, (long)offset);
+}
+
+static inline ssize_t sys_sendfile(int out_fd, int in_fd, off_t *offset, size_t count) {
+  return syscall4(COREOS_SYS_SENDFILE, out_fd, in_fd, (long)offset, (long)count);
+}
+
 static inline ssize_t sys_readv(int fd, const struct iovec *iov, int iovcnt) {
   return syscall3(COREOS_SYS_READV, fd, (long)iov, iovcnt);
+}
+
+static inline ssize_t sys_preadv(int fd, const struct iovec *iov, int iovcnt,
+                                 off_t offset) {
+  return syscall4(COREOS_SYS_PREADV, fd, (long)iov, iovcnt, (long)offset);
+}
+
+static inline ssize_t sys_pwritev(int fd, const struct iovec *iov, int iovcnt,
+                                  off_t offset) {
+  return syscall4(COREOS_SYS_PWRITEV, fd, (long)iov, iovcnt, (long)offset);
 }
 
 static inline int sys_rm(const char *name, size_t name_len) {
@@ -342,8 +389,17 @@ static inline char *sys_getcwd(char *buf, size_t size) {
 static inline int sys_chdir(const char *path, size_t path_len) {
   return (int)syscall2(COREOS_SYS_CHDIR, (long)path, (long)path_len);
 }
+static inline int sys_truncate(const char *path, size_t path_len) {
+  return (int)syscall2(COREOS_SYS_TRUNCATE, (long)path, (long)path_len);
+}
+static inline int sys_ftruncate(int fd, off_t len) {
+  return (int)syscall2(COREOS_SYS_FTRUNCATE, fd, (long)len);
+}
 static inline int sys_getrlimit(int resource, struct rlimit *rlim) {
   return (int)syscall2(COREOS_SYS_GETRLIMIT, resource, (long)rlim);
+}
+static inline int sys_gettimeofday(struct timeval *tv, void *tz) {
+  return (int)syscall2(COREOS_SYS_GETTIMEOFDAY, (long)tv, (long)tz);
 }
 static inline int sys_sigaltstack(const stack_t *ss, stack_t *old_ss) {
   return (int)syscall2(COREOS_SYS_SIGALTSTACK, (long)ss, (long)old_ss);
@@ -380,6 +436,12 @@ static inline int sys_dup(int fd) { return (int)syscall1(COREOS_SYS_DUP, fd); }
 static inline int sys_clock_gettime(int clockid, struct timespec *tp) {
   return (int)syscall2(COREOS_SYS_CLOCK_GETTIME, (long)clockid, (long)tp);
 }
+static inline int sys_clock_nanosleep(int clockid, int flags,
+                                      const struct timespec *req,
+                                      struct timespec *rem) {
+  return (int)syscall4(COREOS_SYS_CLOCK_NANOSLEEP, clockid, flags, (long)req,
+                       (long)rem);
+}
 static inline int sys_fork(void) { return (int)syscall1(COREOS_SYS_FORK, 0); }
 static inline int sys_dup3(int oldfd, int newfd, int flags) {
   return (int)syscall3(COREOS_SYS_DUP3, oldfd, newfd, flags);
@@ -391,9 +453,26 @@ static inline int sys_openat(int dirfd, const char *path, size_t path_len,
                              int flags) {
   return (int)syscall4(COREOS_SYS_OPENAT, dirfd, (long)path, (long)path_len, flags);
 }
+static inline int sys_unlinkat(int dirfd, const char *path, size_t path_len,
+                               int flags) {
+  return (int)syscall4(COREOS_SYS_UNLINKAT, dirfd, (long)path, (long)path_len, flags);
+}
+static inline ssize_t sys_readlink(const char *path, char *buf, size_t bufsiz) {
+  return syscall3(COREOS_SYS_READLINK, (long)path, (long)buf, (long)bufsiz);
+}
+static inline ssize_t sys_readlinkat(int dirfd, const char *path, char *buf,
+                                     size_t bufsiz) {
+  return syscall4(COREOS_SYS_READLINKAT, dirfd, (long)path, (long)buf, (long)bufsiz);
+}
 static inline int sys_fstatat(int dirfd, const char *path, size_t path_len,
                               struct stat *st) {
   return (int)syscall4(COREOS_SYS_FSTATAT, dirfd, (long)path, (long)path_len, (long)st);
+}
+static inline long sys_getrandom(void *buf, size_t len, unsigned int flags) {
+  return syscall3(COREOS_SYS_GETRANDOM, (long)buf, (long)len, flags);
+}
+static inline int sys_arch_prctl(int code, unsigned long addr) {
+  return (int)syscall2(COREOS_SYS_ARCH_PRCTL, code, addr);
 }
 
 // waitpid(pid) — block until child exits, returns exit code
@@ -402,6 +481,11 @@ static inline long sys_waitpid(long pid) { return syscall1(COREOS_SYS_WAITPID, p
 // exit(code)
 static inline void sys_exit(int code) {
   syscall1(COREOS_SYS_EXIT, code);
+  __builtin_unreachable();
+}
+
+static inline void sys_exit_group(int code) {
+  syscall1(COREOS_SYS_EXIT_GROUP, code);
   __builtin_unreachable();
 }
 

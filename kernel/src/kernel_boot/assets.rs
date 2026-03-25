@@ -3,6 +3,7 @@ use crate::{arch, boot, drivers, vfs};
 static EMBEDDED_SHELL: &[u8] = include_bytes!("../../../user/shell.elf");
 static EMBEDDED_SYSCALL_TEST: &[u8] = include_bytes!("../../../user/syscall_test.elf");
 static EMBEDDED_SYSCALL_CHILD: &[u8] = include_bytes!("../../../user/syscall_child.elf");
+static EMBEDDED_POSIX_NEWSYS_TEST: &[u8] = include_bytes!("../../../user/posix_newsys_test.elf");
 static mut ELF_BUF: [u8; 64 * 1024] = [0u8; 64 * 1024];
 static mut FONT_BUF: [u8; 16 * 1024] = [0u8; 16 * 1024];
 
@@ -102,6 +103,13 @@ pub unsafe fn install_ramfs_payloads(assets: &BootAssets) {
             's', 'y', 's', 'c', 'a', 'l', 'l', '_', 'c', 'h', 'i', 'l', 'd',
         ],
         EMBEDDED_SYSCALL_CHILD,
+    );
+    preload_ramfs_file(
+        &[
+            'p', 'o', 's', 'i', 'x', '_', 'n', 'e', 'w', 's', 'y', 's', '_',
+            't', 'e', 's', 't',
+        ],
+        EMBEDDED_POSIX_NEWSYS_TEST,
     );
 
     if assets.elf_len > 0 {

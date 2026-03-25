@@ -38,6 +38,23 @@ pub unsafe fn copy_path_from_user(path_ptr: u64, path_len: u64) -> Option<([char
     }
 }
 
+pub unsafe fn copy_cstr_from_user(path_ptr: u64) -> Option<([u8; MAX_PATH_LEN], usize)> {
+    if path_ptr == 0 {
+        return None;
+    }
+
+    let mut raw = [0u8; MAX_PATH_LEN];
+    for i in 0..MAX_PATH_LEN {
+        let mut byte = [0u8; 1];
+        crate::usercopy::copy_from_user(&mut byte, path_ptr + i as u64).ok()?;
+        raw[i] = byte[0];
+        if byte[0] == 0 {
+            return Some((raw, i));
+        }
+    }
+    None
+}
+
 pub unsafe fn copy_struct_from_user<T: Copy>(user_ptr: u64) -> Option<T> {
     if !crate::usercopy::user_range_ok(user_ptr, core::mem::size_of::<T>()) {
         return None;

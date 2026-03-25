@@ -38,7 +38,8 @@ pub unsafe fn boot_kernel(
     bench::stamp(bench::Phase::RamfsDone);
 
     run_embedded_userspace_test(&[
-        's', 'y', 's', 'c', 'a', 'l', 'l', '_', 't', 'e', 's', 't',
+        'p', 'o', 's', 'i', 'x', '_', 'n', 'e', 'w', 's', 'y', 's', '_',
+        't', 'e', 's', 't',
     ]);
 
     boot_info

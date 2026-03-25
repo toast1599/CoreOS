@@ -5,9 +5,19 @@ use super::{
     PROCESSES,
 };
 
+#[allow(dead_code)]
 pub unsafe fn spawn(task_slot: usize, pml4: usize) -> usize {
+    spawn_named(task_slot, pml4, &[])
+}
+
+pub unsafe fn spawn_named(task_slot: usize, pml4: usize, name: &[char]) -> usize {
     let pid = NEXT_PID.fetch_add(1, Ordering::Relaxed);
     let parent_pid = current_pid();
+    let mut exe_path = [0u8; super::EXE_PATH_MAX];
+    let exe_path_len = name.len().min(super::EXE_PATH_MAX);
+    for (i, ch) in name.iter().take(exe_path_len).enumerate() {
+        exe_path[i] = *ch as u8;
+    }
     PROCESSES[task_slot] = Some(Process {
         pid,
         parent_pid,
@@ -22,6 +32,9 @@ pub unsafe fn spawn(task_slot: usize, pml4: usize) -> usize {
         egid: 0,
         umask: 0o022,
         clear_child_tid: 0,
+        fs_base: 0,
+        exe_path,
+        exe_path_len,
         program_break: 0x4000_0000,
         next_mmap_base: MMAP_BASE,
         pml4,
@@ -69,6 +82,17 @@ pub unsafe fn set_brk(new_brk: usize) {
         if let Some(ref mut p) = PROCESSES[slot] {
             p.program_break = new_brk;
         }
+    }
+}
+
+pub unsafe fn current_fs_base() -> u64 {
+    current_process().map(|p| p.fs_base).unwrap_or(0)
+}
+
+pub unsafe fn current_exe_path() -> ([u8; super::EXE_PATH_MAX], usize) {
+    match current_process() {
+        Some(process) => (process.exe_path, process.exe_path_len),
+        None => ([0; super::EXE_PATH_MAX], 0),
     }
 }
 

@@ -11,6 +11,8 @@ const DEFAULT_FILE_MODE: u32 = S_IFREG | 0o644;
 const DEFAULT_CHAR_MODE: u32 = S_IFCHR | 0o666;
 const DEFAULT_PIPE_MODE: u32 = S_IFIFO | 0o666;
 const AT_FDCWD: i64 = -100;
+const AT_REMOVEDIR: u64 = 0x200;
+const PROC_SELF_EXE: &[u8] = b"/proc/self/exe";
 const F_OK: u64 = 0;
 const X_OK: u64 = 1;
 const W_OK: u64 = 2;
@@ -52,6 +54,28 @@ fn path_is_root(path_ptr: u64, path_len: u64) -> bool {
     }
     let mut raw = [0u8; 1];
     unsafe { crate::usercopy::copy_from_user(&mut raw, path_ptr) }.is_ok() && raw[0] == b'/'
+}
+
+fn build_proc_self_exe_target() -> ([u8; helpers::MAX_PATH_LEN], usize) {
+    let (exe_path, exe_len) = unsafe { crate::proc::current_exe_path() };
+    let mut out = [0u8; helpers::MAX_PATH_LEN];
+    if exe_len == 0 || exe_len + 1 > out.len() {
+        return (out, 0);
+    }
+    out[0] = b'/';
+    out[1..1 + exe_len].copy_from_slice(&exe_path[..exe_len]);
+    (out, exe_len + 1)
+}
+
+unsafe fn readlink_common(path: &[u8], buf_ptr: u64, buf_len: u64) -> SysResult {
+    result::ensure(crate::usercopy::user_range_ok(buf_ptr, buf_len as usize), SysError::Fault)?;
+    result::ensure(path == PROC_SELF_EXE, SysError::NoEntry)?;
+
+    let (target, target_len) = build_proc_self_exe_target();
+    result::ensure(target_len > 0, SysError::NoEntry)?;
+    let count = core::cmp::min(target_len, buf_len as usize);
+    result::ensure(crate::usercopy::copy_to_user(buf_ptr, &target[..count]).is_ok(), SysError::Fault)?;
+    result::ok(count as u64)
 }
 
 pub unsafe fn open(path_ptr: u64, path_len: u64) -> u64 {
@@ -171,6 +195,33 @@ unsafe fn lseek_impl(fd: u64, offset: u64, whence: u64) -> SysResult {
     result::ok(result::option(proc::seek(fd as usize, offset as i64, whence), SysError::BadFd)?)
 }
 
+pub unsafe fn truncate(path_ptr: u64, path_len: u64) -> u64 {
+    result::ret(truncate_impl(path_ptr, path_len))
+}
+
+unsafe fn truncate_impl(path_ptr: u64, path_len: u64) -> SysResult {
+    let (name_buf, name_len) =
+        result::option(helpers::copy_path_from_user(path_ptr, path_len), SysError::Fault)?;
+    let file_idx =
+        result::option(super::fs::fs_find_idx(&name_buf[..name_len]), SysError::NoEntry)?;
+    result::ensure(super::fs::fs_resize(file_idx, 0), SysError::Invalid)?;
+    result::ok(0u64)
+}
+
+pub unsafe fn ftruncate(fd: u64, len: u64) -> u64 {
+    result::ret(ftruncate_impl(fd, len))
+}
+
+unsafe fn ftruncate_impl(fd: u64, len: u64) -> SysResult {
+    let DescriptorInfo::File { file_idx, .. } =
+        result::option(proc::descriptor_info(fd as usize), SysError::BadFd)?
+    else {
+        return result::err(SysError::Unsupported);
+    };
+    result::ensure(super::fs::fs_resize(file_idx, len as usize), SysError::Invalid)?;
+    result::ok(0u64)
+}
+
 pub unsafe fn ls(buf_ptr: u64, buf_len: u64) -> u64 {
     result::ret(ls_impl(buf_ptr, buf_len))
 }
@@ -254,6 +305,36 @@ unsafe fn rm_impl(name_ptr: u64, name_len: u64) -> SysResult {
         result::option(helpers::copy_path_from_user(name_ptr, name_len), SysError::Fault)?;
     result::ensure(crate::vfs::remove(&name_buf[..name_len]), SysError::NoEntry)?;
     result::ok(0u64)
+}
+
+pub unsafe fn unlinkat(dirfd: u64, path_ptr: u64, path_len: u64, flags: u64) -> u64 {
+    result::ret(unlinkat_impl(dirfd, path_ptr, path_len, flags))
+}
+
+unsafe fn unlinkat_impl(dirfd: u64, path_ptr: u64, path_len: u64, flags: u64) -> SysResult {
+    result::ensure(dirfd as i64 == AT_FDCWD, SysError::Unsupported)?;
+    result::ensure(flags == 0 || flags == AT_REMOVEDIR, SysError::Invalid)?;
+    result::ensure(flags & AT_REMOVEDIR == 0, SysError::Unsupported)?;
+    rm_impl(path_ptr, path_len)
+}
+
+pub unsafe fn readlink(path_ptr: u64, buf_ptr: u64, buf_len: u64) -> u64 {
+    result::ret(readlink_impl(path_ptr, buf_ptr, buf_len))
+}
+
+unsafe fn readlink_impl(path_ptr: u64, buf_ptr: u64, buf_len: u64) -> SysResult {
+    let (path, path_len) = result::option(helpers::copy_cstr_from_user(path_ptr), SysError::Fault)?;
+    readlink_common(&path[..path_len], buf_ptr, buf_len)
+}
+
+pub unsafe fn readlinkat(dirfd: u64, path_ptr: u64, buf_ptr: u64, buf_len: u64) -> u64 {
+    result::ret(readlinkat_impl(dirfd, path_ptr, buf_ptr, buf_len))
+}
+
+unsafe fn readlinkat_impl(dirfd: u64, path_ptr: u64, buf_ptr: u64, buf_len: u64) -> SysResult {
+    result::ensure(dirfd as i64 == AT_FDCWD, SysError::Unsupported)?;
+    let (path, path_len) = result::option(helpers::copy_cstr_from_user(path_ptr), SysError::Fault)?;
+    readlink_common(&path[..path_len], buf_ptr, buf_len)
 }
 
 pub unsafe fn write_file(name_ptr: u64, name_len: u64, args_ptr: u64) -> u64 {

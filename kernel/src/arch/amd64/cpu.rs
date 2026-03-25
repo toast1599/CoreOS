@@ -1,5 +1,7 @@
 use core::arch::asm;
 
+const IA32_FS_BASE: u32 = 0xC000_0100;
+
 #[inline]
 pub unsafe fn cli() {
     asm!("cli", options(nomem, nostack));
@@ -29,4 +31,17 @@ pub unsafe fn restore_interrupts(enabled: bool) {
     } else {
         cli();
     }
+}
+
+#[inline]
+pub unsafe fn write_fs_base(value: u64) {
+    let lo = value as u32;
+    let hi = (value >> 32) as u32;
+    asm!(
+        "wrmsr",
+        in("ecx") IA32_FS_BASE,
+        in("eax") lo,
+        in("edx") hi,
+        options(nostack, nomem)
+    );
 }

@@ -17,7 +17,7 @@ LDFLAGS = -T shell.ld \
           -static
 
 COMMON_OBJS = start.o libcshim/libcshim.o
-ALL_ELFS = shell.elf syscall_test.elf syscall_child.elf
+ALL_ELFS = shell.elf syscall_test.elf syscall_child.elf posix_newsys_test.elf
 
 .PHONY: all clean
 
@@ -35,6 +35,9 @@ syscall_test.o: syscall_test.c libcshim/libcshim.h libcshim/sysnr.h
 syscall_child.o: syscall_child.c libcshim/libcshim.h libcshim/sysnr.h
 	$(CC) $(CFLAGS) -c syscall_child.c -o syscall_child.o
 
+posix_newsys_test.o: posix_newsys_test.c libcshim/libcshim.h libcshim/sysnr.h
+	$(CC) $(CFLAGS) -c posix_newsys_test.c -o posix_newsys_test.o
+
 libcshim/libcshim.o: libcshim/libcshim.c libcshim/libcshim.h libcshim/sysnr.h
 	$(CC) $(CFLAGS) -c libcshim/libcshim.c -o libcshim/libcshim.o
 
@@ -46,6 +49,9 @@ syscall_test.elf: $(COMMON_OBJS) syscall_test.o shell.ld
 
 syscall_child.elf: $(COMMON_OBJS) syscall_child.o shell.ld
 	$(LD) $(LDFLAGS) -o syscall_child.elf $(COMMON_OBJS) syscall_child.o
+
+posix_newsys_test.elf: $(COMMON_OBJS) posix_newsys_test.o shell.ld
+	$(LD) $(LDFLAGS) -o posix_newsys_test.elf $(COMMON_OBJS) posix_newsys_test.o
 
 clean:
 	rm -f *.o *.elf

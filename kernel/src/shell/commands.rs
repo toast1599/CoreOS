@@ -242,7 +242,7 @@ fn cmd_exec(buf: &[char; BUF_LEN], ctx: &ShellContext) -> ShellOutput {
 
     crate::drivers::vga::console::set_userspace_cursor(20, *ctx.current_y + 16 * (*ctx.global_scale));
 
-    let (pid, _slot) = unsafe { crate::proc::exec::exec_as_task(elf_bytes.as_slice()) };
+    let (pid, _slot) = unsafe { crate::proc::exec::exec_as_task(elf_bytes.as_slice(), filename) };
     if pid == 0 {
         ShellOutput::Print("exec failed.".into())
     } else {

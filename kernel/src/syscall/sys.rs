@@ -1,3 +1,6 @@
+use alloc::vec;
+use core::sync::atomic::{AtomicU64, Ordering};
+
 use crate::syscall::helpers;
 use crate::syscall::result::{self, SysError, SysResult};
 use crate::syscall::types::{StackT, SysInfo};
@@ -73,6 +76,13 @@ const RLIMIT_AS: i32 = 9; // Address space
 const RLIMIT_DATA: i32 = 2; // Data segment
 const RLIMIT_CORE: i32 = 4; // Core file size
 const ROOT_DIR: &[u8] = b"/\0";
+const ARCH_SET_FS: u64 = 0x1002;
+const ARCH_GET_FS: u64 = 0x1003;
+const USER_TOP: u64 = 0x0000_8000_0000_0000;
+const GRND_NONBLOCK: u64 = 0x0001;
+const GRND_RANDOM: u64 = 0x0002;
+
+static RNG_STATE: AtomicU64 = AtomicU64::new(0);
 
 /// getrlimit(resource, rlim) - Get resource limits
 fn syscall_getrlimit_impl(resource: i32, rlim: u64) -> SysResult {
@@ -216,4 +226,64 @@ fn syscall_sysinfo_impl(info_ptr: u64) -> SysResult {
         SysError::Fault,
     )?;
     result::ok(0u64)
+}
+
+pub fn syscall_arch_prctl(code: u64, addr: u64) -> u64 {
+    result::ret(syscall_arch_prctl_impl(code, addr))
+}
+
+fn syscall_arch_prctl_impl(code: u64, addr: u64) -> SysResult {
+    match code {
+        ARCH_SET_FS => {
+            result::ensure(addr < USER_TOP, SysError::Invalid)?;
+            let process = result::option(unsafe { crate::proc::current_process_mut() }, SysError::Invalid)?;
+            process.fs_base = addr;
+            unsafe { crate::arch::amd64::cpu::write_fs_base(addr) };
+            result::ok(0u64)
+        }
+        ARCH_GET_FS => {
+            result::ensure(addr != 0, SysError::Fault)?;
+            let fs_base = unsafe { crate::proc::current_fs_base() };
+            result::ensure(unsafe { helpers::copy_struct_to_user(addr, &fs_base) }, SysError::Fault)?;
+            result::ok(0u64)
+        }
+        _ => result::err(SysError::Unsupported),
+    }
+}
+
+fn next_random_u64() -> u64 {
+    let mut state = RNG_STATE.load(Ordering::Relaxed);
+    if state == 0 {
+        state = crate::hw::pit::ticks()
+            ^ ((unsafe { crate::proc::current_pid() } as u64) << 32)
+            ^ 0x9E37_79B9_7F4A_7C15;
+    }
+    state ^= state << 13;
+    state ^= state >> 7;
+    state ^= state << 17;
+    RNG_STATE.store(state, Ordering::Relaxed);
+    state
+}
+
+pub fn syscall_getrandom(buf_ptr: u64, len: u64, flags: u64) -> u64 {
+    result::ret(syscall_getrandom_impl(buf_ptr, len, flags))
+}
+
+fn syscall_getrandom_impl(buf_ptr: u64, len: u64, flags: u64) -> SysResult {
+    result::ensure(flags & !(GRND_NONBLOCK | GRND_RANDOM) == 0, SysError::Invalid)?;
+    let len = len as usize;
+    result::ensure(crate::usercopy::user_range_ok(buf_ptr, len), SysError::Fault)?;
+
+    let mut bytes = vec![0u8; len];
+    let mut remaining = 0u64;
+    for byte in bytes.iter_mut() {
+        if remaining == 0 {
+            remaining = next_random_u64();
+        }
+        *byte = remaining as u8;
+        remaining >>= 8;
+    }
+
+    result::ensure(unsafe { crate::usercopy::copy_to_user(buf_ptr, &bytes) }.is_ok(), SysError::Fault)?;
+    result::ok(len as u64)
 }

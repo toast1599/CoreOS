@@ -140,3 +140,118 @@ unsafe fn ioctl_impl(fd: u64, req: u64, argp: u64) -> SysResult {
         _ => result::err(SysError::Unsupported),
     }
 }
+
+pub unsafe fn pread64(fd: u64, buf_ptr: u64, count: u64, offset: u64) -> u64 {
+    result::ret(pread64_impl(fd, buf_ptr, count, offset))
+}
+
+unsafe fn pread64_impl(fd: u64, buf_ptr: u64, count: u64, offset: u64) -> SysResult {
+    let len = count as usize;
+    result::ensure(crate::usercopy::user_range_ok(buf_ptr, len), SysError::Fault)?;
+    let DescriptorInfo::File { file_idx, .. } =
+        result::option(crate::proc::descriptor_info(fd as usize), SysError::BadFd)?
+    else {
+        return result::err(SysError::Unsupported);
+    };
+
+    let bytes = result::option(crate::syscall::fs::fs_read_to_vec(file_idx, offset as usize, len), SysError::BadFd)?;
+    result::ensure(crate::usercopy::copy_to_user(buf_ptr, bytes.as_slice()).is_ok(), SysError::Fault)?;
+    result::ok(bytes.len() as u64)
+}
+
+pub unsafe fn pwrite64(fd: u64, buf_ptr: u64, count: u64, offset: u64) -> u64 {
+    result::ret(pwrite64_impl(fd, buf_ptr, count, offset))
+}
+
+unsafe fn pwrite64_impl(fd: u64, buf_ptr: u64, count: u64, offset: u64) -> SysResult {
+    let len = count as usize;
+    result::ensure(crate::usercopy::user_range_ok(buf_ptr, len), SysError::Fault)?;
+    let DescriptorInfo::File { file_idx, .. } =
+        result::option(crate::proc::descriptor_info(fd as usize), SysError::BadFd)?
+    else {
+        return result::err(SysError::Unsupported);
+    };
+
+    let mut bytes = alloc::vec![0u8; len];
+    result::ensure(crate::usercopy::copy_from_user(&mut bytes, buf_ptr).is_ok(), SysError::Fault)?;
+    result::ensure(crate::syscall::fs::fs_write_at(file_idx, offset as usize, bytes.as_slice()), SysError::BadFd)?;
+    result::ok(len as u64)
+}
+
+pub unsafe fn preadv(fd: u64, iov_ptr: u64, iovcnt: u64, offset: u64) -> u64 {
+    result::ret(preadv_impl(fd, iov_ptr, iovcnt, offset))
+}
+
+unsafe fn preadv_impl(fd: u64, iov_ptr: u64, iovcnt: u64, offset: u64) -> SysResult {
+    let (iovs, count) =
+        result::option(helpers::copy_iovecs_from_user(iov_ptr, iovcnt), SysError::Fault)?;
+    let mut total = 0usize;
+    let mut cur_off = offset;
+    for iov in &iovs[..count] {
+        let len = iov.iov_len as usize;
+        result::ensure(crate::usercopy::user_range_ok(iov.iov_base, len), SysError::Fault)?;
+        let bytes = pread64_impl(fd, iov.iov_base, iov.iov_len, cur_off)? as usize;
+        total = total.saturating_add(bytes);
+        cur_off = cur_off.saturating_add(bytes as u64);
+        if bytes != len {
+            break;
+        }
+    }
+    result::ok(total as u64)
+}
+
+pub unsafe fn pwritev(fd: u64, iov_ptr: u64, iovcnt: u64, offset: u64) -> u64 {
+    result::ret(pwritev_impl(fd, iov_ptr, iovcnt, offset))
+}
+
+unsafe fn pwritev_impl(fd: u64, iov_ptr: u64, iovcnt: u64, offset: u64) -> SysResult {
+    let (iovs, count) =
+        result::option(helpers::copy_iovecs_from_user(iov_ptr, iovcnt), SysError::Fault)?;
+    let mut total = 0usize;
+    let mut cur_off = offset;
+    for iov in &iovs[..count] {
+        let written = pwrite64_impl(fd, iov.iov_base, iov.iov_len, cur_off)?;
+        let written = written as usize;
+        total = total.saturating_add(written);
+        cur_off = cur_off.saturating_add(written as u64);
+        if written != iov.iov_len as usize {
+            break;
+        }
+    }
+    result::ok(total as u64)
+}
+
+pub unsafe fn sendfile(out_fd: u64, in_fd: u64, offset_ptr: u64, count: u64) -> u64 {
+    result::ret(sendfile_impl(out_fd, in_fd, offset_ptr, count))
+}
+
+unsafe fn sendfile_impl(out_fd: u64, in_fd: u64, offset_ptr: u64, count: u64) -> SysResult {
+    let count = count as usize;
+    let DescriptorInfo::File { file_idx, .. } =
+        result::option(crate::proc::descriptor_info(in_fd as usize), SysError::BadFd)?
+    else {
+        return result::err(SysError::Unsupported);
+    };
+
+    let start_offset = if offset_ptr != 0 {
+        let offset: i64 = result::option(helpers::copy_struct_from_user(offset_ptr), SysError::Fault)?;
+        result::ensure(offset >= 0, SysError::Invalid)?;
+        offset as usize
+    } else {
+        let of = result::option(crate::proc::get_fd_mut(in_fd as usize), SysError::BadFd)?;
+        of.offset
+    };
+
+    let bytes = result::option(crate::syscall::fs::fs_read_to_vec(file_idx, start_offset, count), SysError::BadFd)?;
+    let written = result::option(write_to_fd(out_fd as usize, bytes.as_ptr(), bytes.len()), SysError::BadFd)?;
+
+    if offset_ptr != 0 {
+        let new_offset = (start_offset + written) as i64;
+        result::ensure(helpers::copy_struct_to_user(offset_ptr, &new_offset), SysError::Fault)?;
+    } else {
+        let of = result::option(crate::proc::get_fd_mut(in_fd as usize), SysError::BadFd)?;
+        of.offset = start_offset + written;
+    }
+
+    result::ok(written as u64)
+}

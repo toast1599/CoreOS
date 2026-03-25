@@ -30,7 +30,7 @@ pub unsafe fn run_shell(boot_info: *const boot::CoreOS_BootInfo) -> ! {
         let elf_data = vfs::clone_bytes(name);
 
         if let Some(data) = elf_data {
-            let (pid, slot) = crate::proc::exec::exec_as_task(&data);
+            let (pid, slot) = crate::proc::exec::exec_as_task(&data, name);
             if pid > 0 {
                 let mut last_s = 255u8;
                 while proc::is_running_in_slot(slot) {

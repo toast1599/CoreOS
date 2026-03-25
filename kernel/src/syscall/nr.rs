@@ -20,6 +20,8 @@ pub const BRK: u64 = 12;
 pub const RT_SIGACTION: u64 = 13;
 pub const RT_SIGPROCMASK: u64 = 14;
 pub const IOCTL: u64 = 16;
+pub const PREAD64: u64 = 17;
+pub const PWRITE64: u64 = 18;
 pub const READV: u64 = 19;
 pub const WRITEV: u64 = 20;
 pub const UPTIME_SECONDS: u64 = 21;
@@ -40,6 +42,7 @@ pub const NANOSLEEP: u64 = 35;
 pub const FREE_BYTES: u64 = 36;
 pub const TICKS: u64 = 37;
 pub const GETPID: u64 = 39;
+pub const SENDFILE: u64 = 40;
 pub const SOCKET: u64 = 41;
 pub const CONNECT: u64 = 42;
 pub const ACCEPT: u64 = 43;
@@ -60,9 +63,13 @@ pub const WAITPID: u64 = 61;
 pub const KILL: u64 = 62;
 pub const UNAME: u64 = 63;
 pub const FCNTL: u64 = 72;
+pub const TRUNCATE: u64 = 76;
+pub const FTRUNCATE: u64 = 77;
 pub const GETCWD: u64 = 79;
 pub const CHDIR: u64 = 80;
+pub const READLINK: u64 = 89;
 pub const UMASK: u64 = 95;
+pub const GETTIMEOFDAY: u64 = 96;
 pub const GETRLIMIT: u64 = 97;
 pub const SYSINFO: u64 = 99;
 pub const GETUID: u64 = 102;
@@ -79,17 +86,25 @@ pub const GETRESGID: u64 = 120;
 pub const GETPGID: u64 = 121;
 pub const GETSID: u64 = 124;
 pub const SIGALTSTACK: u64 = 131;
+pub const ARCH_PRCTL: u64 = 158;
 pub const SETRLIMIT: u64 = 160;
 pub const GETTID: u64 = 186;
 pub const SET_TID_ADDRESS: u64 = 218;
 pub const CLOCK_GETTIME: u64 = 228;
+pub const CLOCK_NANOSLEEP: u64 = 230;
+pub const EXIT_GROUP: u64 = 231;
 pub const OPENAT: u64 = 257;
 pub const FSTATAT: u64 = 262;
+pub const UNLINKAT: u64 = 263;
+pub const READLINKAT: u64 = 267;
 pub const FACCESSAT: u64 = 269;
 pub const ACCEPT4: u64 = 288;
 pub const DUP3: u64 = 292;
 pub const PIPE2: u64 = 293;
+pub const PREADV: u64 = 295;
+pub const PWRITEV: u64 = 296;
 pub const PRLIMIT64: u64 = 302;
+pub const GETRANDOM: u64 = 318;
 
 #[allow(dead_code)]
 pub const ALL: &[SyscallMeta] = &[
@@ -107,6 +122,8 @@ pub const ALL: &[SyscallMeta] = &[
     SyscallMeta { number: RT_SIGACTION, name: "rt_sigaction" },
     SyscallMeta { number: RT_SIGPROCMASK, name: "rt_sigprocmask" },
     SyscallMeta { number: IOCTL, name: "ioctl" },
+    SyscallMeta { number: PREAD64, name: "pread64" },
+    SyscallMeta { number: PWRITE64, name: "pwrite64" },
     SyscallMeta { number: READV, name: "readv" },
     SyscallMeta { number: WRITEV, name: "writev" },
     SyscallMeta { number: UPTIME_SECONDS, name: "uptime_seconds" },
@@ -127,6 +144,7 @@ pub const ALL: &[SyscallMeta] = &[
     SyscallMeta { number: FREE_BYTES, name: "free_bytes" },
     SyscallMeta { number: TICKS, name: "ticks" },
     SyscallMeta { number: GETPID, name: "getpid" },
+    SyscallMeta { number: SENDFILE, name: "sendfile" },
     SyscallMeta { number: SOCKET, name: "socket" },
     SyscallMeta { number: CONNECT, name: "connect" },
     SyscallMeta { number: ACCEPT, name: "accept" },
@@ -147,9 +165,13 @@ pub const ALL: &[SyscallMeta] = &[
     SyscallMeta { number: KILL, name: "kill" },
     SyscallMeta { number: UNAME, name: "uname" },
     SyscallMeta { number: FCNTL, name: "fcntl" },
+    SyscallMeta { number: TRUNCATE, name: "truncate" },
+    SyscallMeta { number: FTRUNCATE, name: "ftruncate" },
     SyscallMeta { number: GETCWD, name: "getcwd" },
     SyscallMeta { number: CHDIR, name: "chdir" },
+    SyscallMeta { number: READLINK, name: "readlink" },
     SyscallMeta { number: UMASK, name: "umask" },
+    SyscallMeta { number: GETTIMEOFDAY, name: "gettimeofday" },
     SyscallMeta { number: GETRLIMIT, name: "getrlimit" },
     SyscallMeta { number: SYSINFO, name: "sysinfo" },
     SyscallMeta { number: GETUID, name: "getuid" },
@@ -166,17 +188,25 @@ pub const ALL: &[SyscallMeta] = &[
     SyscallMeta { number: GETPGID, name: "getpgid" },
     SyscallMeta { number: GETSID, name: "getsid" },
     SyscallMeta { number: SIGALTSTACK, name: "sigaltstack" },
+    SyscallMeta { number: ARCH_PRCTL, name: "arch_prctl" },
     SyscallMeta { number: SETRLIMIT, name: "setrlimit" },
     SyscallMeta { number: GETTID, name: "gettid" },
     SyscallMeta { number: SET_TID_ADDRESS, name: "set_tid_address" },
     SyscallMeta { number: CLOCK_GETTIME, name: "clock_gettime" },
+    SyscallMeta { number: CLOCK_NANOSLEEP, name: "clock_nanosleep" },
+    SyscallMeta { number: EXIT_GROUP, name: "exit_group" },
     SyscallMeta { number: OPENAT, name: "openat" },
     SyscallMeta { number: FSTATAT, name: "fstatat" },
+    SyscallMeta { number: UNLINKAT, name: "unlinkat" },
+    SyscallMeta { number: READLINKAT, name: "readlinkat" },
     SyscallMeta { number: FACCESSAT, name: "faccessat" },
     SyscallMeta { number: ACCEPT4, name: "accept4" },
     SyscallMeta { number: DUP3, name: "dup3" },
     SyscallMeta { number: PIPE2, name: "pipe2" },
-    SyscallMeta { number: PRLIMIT64, name: "prlimit64" }
+    SyscallMeta { number: PREADV, name: "preadv" },
+    SyscallMeta { number: PWRITEV, name: "pwritev" },
+    SyscallMeta { number: PRLIMIT64, name: "prlimit64" },
+    SyscallMeta { number: GETRANDOM, name: "getrandom" }
 ];
 
 #[allow(dead_code)]
@@ -196,6 +226,8 @@ pub fn name(number: u64) -> Option<&'static str> {
         RT_SIGACTION => Some("rt_sigaction"),
         RT_SIGPROCMASK => Some("rt_sigprocmask"),
         IOCTL => Some("ioctl"),
+        PREAD64 => Some("pread64"),
+        PWRITE64 => Some("pwrite64"),
         READV => Some("readv"),
         WRITEV => Some("writev"),
         UPTIME_SECONDS => Some("uptime_seconds"),
@@ -216,6 +248,7 @@ pub fn name(number: u64) -> Option<&'static str> {
         FREE_BYTES => Some("free_bytes"),
         TICKS => Some("ticks"),
         GETPID => Some("getpid"),
+        SENDFILE => Some("sendfile"),
         SOCKET => Some("socket"),
         CONNECT => Some("connect"),
         ACCEPT => Some("accept"),
@@ -236,9 +269,13 @@ pub fn name(number: u64) -> Option<&'static str> {
         KILL => Some("kill"),
         UNAME => Some("uname"),
         FCNTL => Some("fcntl"),
+        TRUNCATE => Some("truncate"),
+        FTRUNCATE => Some("ftruncate"),
         GETCWD => Some("getcwd"),
         CHDIR => Some("chdir"),
+        READLINK => Some("readlink"),
         UMASK => Some("umask"),
+        GETTIMEOFDAY => Some("gettimeofday"),
         GETRLIMIT => Some("getrlimit"),
         SYSINFO => Some("sysinfo"),
         GETUID => Some("getuid"),
@@ -255,17 +292,25 @@ pub fn name(number: u64) -> Option<&'static str> {
         GETPGID => Some("getpgid"),
         GETSID => Some("getsid"),
         SIGALTSTACK => Some("sigaltstack"),
+        ARCH_PRCTL => Some("arch_prctl"),
         SETRLIMIT => Some("setrlimit"),
         GETTID => Some("gettid"),
         SET_TID_ADDRESS => Some("set_tid_address"),
         CLOCK_GETTIME => Some("clock_gettime"),
+        CLOCK_NANOSLEEP => Some("clock_nanosleep"),
+        EXIT_GROUP => Some("exit_group"),
         OPENAT => Some("openat"),
         FSTATAT => Some("fstatat"),
+        UNLINKAT => Some("unlinkat"),
+        READLINKAT => Some("readlinkat"),
         FACCESSAT => Some("faccessat"),
         ACCEPT4 => Some("accept4"),
         DUP3 => Some("dup3"),
         PIPE2 => Some("pipe2"),
+        PREADV => Some("preadv"),
+        PWRITEV => Some("pwritev"),
         PRLIMIT64 => Some("prlimit64"),
+        GETRANDOM => Some("getrandom"),
         _ => None,
     }
 }

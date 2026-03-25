@@ -18,6 +18,7 @@ pub const MAX_FDS: usize = 16;
 pub const MAX_OPEN_FILES: usize = 32;
 pub const MAX_PIPES: usize = 16;
 pub const MAX_VMAS: usize = 32;
+pub const EXE_PATH_MAX: usize = 64;
 pub const MMAP_BASE: usize = 0x0000_0001_0000_0000;
 pub const FD_CLOEXEC: u32 = 1;
 const PIPE_CAPACITY: usize = 1024;
@@ -147,6 +148,9 @@ pub struct Process {
     pub egid: u32,
     pub umask: u32,
     pub clear_child_tid: u64,
+    pub fs_base: u64,
+    pub exe_path: [u8; EXE_PATH_MAX],
+    pub exe_path_len: usize,
     pub program_break: usize,
     pub next_mmap_base: usize,
     pub pml4: usize,
@@ -185,12 +189,13 @@ fn default_fd_flags() -> [u32; MAX_FDS] {
 
 pub use fd::{
     close_descriptor, create_pipe_pair, dup_exact, dup_min, fd_exists, fork_current,
-    get_fd_flags, get_status_flags, is_stdin, is_stdout_or_stderr, open_file, read_file,
+    get_fd_flags, get_fd_mut, get_status_flags, is_stdin, is_stdout_or_stderr, open_file, read_file,
     read_pipe, reap_slot, seek, set_cloexec, set_status_flags, write_pipe,
 };
 pub use fd::{descriptor_info, file_size};
 pub use process::{
     current_brk, current_pid, current_ppid, current_process, current_process_mut, exit,
-    find_slot_by_pid, is_running_in_slot, set_brk, spawn, active_process_count,
+    find_slot_by_pid, is_running_in_slot, set_brk, spawn_named, active_process_count,
+    current_fs_base, current_exe_path,
 };
 pub use vm::{alloc_vma, find_vma_exact_mut, region_conflicts, reserve_mmap_base};

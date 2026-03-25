@@ -10,7 +10,7 @@ SYSCALL_GEN = tools/generate_syscalls.py
 SYSCALL_OUT = kernel/src/syscall/nr.rs kernel/src/syscall/dispatch.rs user/libcshim/sysnr.h
 
 IMAGE     = $(BUILD_DIR)/coreos.img
-USER_ELFS = user/shell.elf user/syscall_test.elf user/syscall_child.elf
+USER_ELFS = user/shell.elf user/syscall_test.elf user/syscall_child.elf user/posix_newsys_test.elf
 
 # =========================
 # Kernel (Rust)
@@ -85,6 +85,7 @@ $(IMAGE): $(KERNEL_BIN) $(LOADER_EFI) $(USER_ELFS)
 	mcopy -i $(IMAGE) user/shell.elf ::/test.elf
 	mcopy -i $(IMAGE) user/syscall_test.elf ::/syscall_test.elf
 	mcopy -i $(IMAGE) user/syscall_child.elf ::/syscall_child.elf
+	mcopy -i $(IMAGE) user/posix_newsys_test.elf ::/posix_newsys_test.elf
 	mcopy -i $(IMAGE) assets/font.psfu ::/
 
 $(USER_ELFS): dirs $(SYSCALL_OUT)

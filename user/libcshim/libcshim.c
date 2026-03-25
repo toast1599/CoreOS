@@ -48,6 +48,14 @@ ssize_t writev(int fd, const struct iovec *iov, int iovcnt) {
     return sys_writev(fd, iov, iovcnt);
 }
 
+ssize_t preadv(int fd, const struct iovec *iov, int iovcnt, off_t offset) {
+    return sys_preadv(fd, iov, iovcnt, offset);
+}
+
+ssize_t pwritev(int fd, const struct iovec *iov, int iovcnt, off_t offset) {
+    return sys_pwritev(fd, iov, iovcnt, offset);
+}
+
 off_t lseek(int fd, off_t offset, int whence) {
     return (off_t)sys_lseek(fd, (long)offset, whence);
 }
@@ -128,8 +136,21 @@ int chdir(const char *path) {
     return sys_chdir(path, str_len(path));
 }
 
+int truncate(const char *path, off_t length) {
+    if (length != 0) return -1;
+    return sys_truncate(path, str_len(path));
+}
+
+int ftruncate(int fd, off_t length) {
+    return sys_ftruncate(fd, length);
+}
+
 int getrlimit(int resource, struct rlimit *rlim) {
     return sys_getrlimit(resource, rlim);
+}
+
+int gettimeofday(struct timeval *tv, void *tz) {
+    return sys_gettimeofday(tv, tz);
 }
 
 int sigaltstack(const stack_t *ss, stack_t *old_ss) {
@@ -138,6 +159,18 @@ int sigaltstack(const stack_t *ss, stack_t *old_ss) {
 
 unsigned int umask(unsigned int mask) {
     return sys_umask(mask);
+}
+
+ssize_t pread(int fd, void *buf, size_t count, off_t offset) {
+    return sys_pread64(fd, buf, count, offset);
+}
+
+ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset) {
+    return sys_pwrite64(fd, buf, count, offset);
+}
+
+ssize_t sendfile(int out_fd, int in_fd, off_t *offset, size_t count) {
+    return sys_sendfile(out_fd, in_fd, offset, count);
 }
 
 int faccessat(int dirfd, const char *path, int mode, int flags) {
@@ -169,6 +202,11 @@ int clock_gettime(int clockid, struct timespec *tp) {
     return sys_clock_gettime(clockid, tp);
 }
 
+int clock_nanosleep(int clockid, int flags, const struct timespec *req,
+                    struct timespec *rem) {
+    return sys_clock_nanosleep(clockid, flags, req, rem);
+}
+
 int dup(int fd) {
     return sys_dup(fd);
 }
@@ -187,6 +225,26 @@ int fork(void) {
 
 int openat(int dirfd, const char *path, int flags, ...) {
     return sys_openat(dirfd, path, str_len(path), flags);
+}
+
+int unlinkat(int dirfd, const char *path, int flags) {
+    return sys_unlinkat(dirfd, path, str_len(path), flags);
+}
+
+ssize_t readlink(const char *path, char *buf, size_t bufsiz) {
+    return sys_readlink(path, buf, bufsiz);
+}
+
+ssize_t readlinkat(int dirfd, const char *path, char *buf, size_t bufsiz) {
+    return sys_readlinkat(dirfd, path, buf, bufsiz);
+}
+
+long getrandom(void *buf, size_t len, unsigned int flags) {
+    return sys_getrandom(buf, len, flags);
+}
+
+int arch_prctl(int code, unsigned long addr) {
+    return sys_arch_prctl(code, addr);
 }
 
 int stat(const char *path, struct stat *st) {

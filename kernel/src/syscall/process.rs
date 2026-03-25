@@ -34,7 +34,7 @@ unsafe fn syscall_exec_impl(path_ptr: u64, path_len: u64) -> SysResult {
             return result::err(SysError::NoEntry);
         }
     };
-    let (pid, _slot) = crate::proc::exec::exec_as_task(elf_bytes.as_slice());
+    let (pid, _slot) = crate::proc::exec::exec_as_task(elf_bytes.as_slice(), &name_buf[..name_len]);
     result::ensure(pid != 0, SysError::Invalid)?;
     result::ok(pid as u64)
 }

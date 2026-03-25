@@ -55,7 +55,7 @@ pub unsafe fn run_embedded_userspace_test(name: &[char]) {
 
     if let Some(data) = elf_data {
         crate::serial_fmt!("Running embedded userspace test {:?}\n", name);
-        let (pid, slot) = proc::exec::exec_as_task(&data);
+        let (pid, slot) = proc::exec::exec_as_task(&data, name);
         if pid == 0 {
             drivers::serial::write_str("Failed to spawn embedded userspace test\n");
             return;

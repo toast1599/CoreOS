@@ -1,6 +1,7 @@
 #include "libcshim/libcshim.h"
 
 #define TEST_FILE "syscall_probe"
+#define TEST_FILE_UNLINK "syscall_unlink"
 #define CHILD_FILE "syscall_child"
 
 static int failures = 0;
@@ -71,6 +72,12 @@ static void check(int cond, const char *name, long detail) {
     pass(name);
   else
     fail(name, detail);
+}
+
+static unsigned long read_fs_qword0(void) {
+  unsigned long value;
+  __asm__ volatile("mov %%fs:0, %0" : "=r"(value));
+  return value;
 }
 
 static void test_basic_info(void) {
@@ -147,6 +154,39 @@ static void test_basic_info(void) {
   check(rc0 == 0 && rc1 == 0, "clock_gettime", rc0 | rc1);
   check(ns == 0 && delta_ns >= 10 * 1000 * 1000L, "nanosleep", delta_ns);
 
+  struct timespec abs_target = t1;
+  abs_target.tv_nsec += 15 * 1000 * 1000L;
+  if (abs_target.tv_nsec >= 1000000000L) {
+    abs_target.tv_sec += 1;
+    abs_target.tv_nsec -= 1000000000L;
+  }
+  int cns = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &abs_target, 0);
+  struct timespec t2;
+  int rc2 = clock_gettime(CLOCK_MONOTONIC, &t2);
+  long delta_abs_ns = (t2.tv_sec - t1.tv_sec) * 1000000000L + (t2.tv_nsec - t1.tv_nsec);
+  check(cns == 0 && rc2 == 0 && delta_abs_ns >= 10 * 1000 * 1000L,
+        "clock_nanosleep", delta_abs_ns);
+
+  unsigned long tls_word = 0x1122334455667788UL;
+  unsigned long tls_base = 0;
+  check(arch_prctl(ARCH_SET_FS, (unsigned long)&tls_word) == 0, "arch_prctl_set_fs", 0);
+  check(arch_prctl(ARCH_GET_FS, (unsigned long)&tls_base) == 0 && tls_base == (unsigned long)&tls_word,
+        "arch_prctl_get_fs", tls_base);
+  check(read_fs_qword0() == tls_word, "arch_prctl_fs_read", (long)read_fs_qword0());
+  check(getpid() > 0 && read_fs_qword0() == tls_word, "arch_prctl_fs_persist", (long)read_fs_qword0());
+  check(arch_prctl(ARCH_SET_FS, 0) == 0, "arch_prctl_reset_fs", 0);
+
+  unsigned char random_buf[16] = {0};
+  long gr = getrandom(random_buf, sizeof(random_buf), 0);
+  int nonzero = 0;
+  for (size_t i = 0; i < sizeof(random_buf); i++) {
+    if (random_buf[i] != 0) {
+      nonzero = 1;
+      break;
+    }
+  }
+  check(gr == (long)sizeof(random_buf) && nonzero, "getrandom", gr);
+
   struct winsize ws;
   struct termios tio;
   check(ioctl(1, TIOCGWINSZ, &ws) == 0 && ws.ws_row > 0 && ws.ws_col > 0,
@@ -187,11 +227,14 @@ static void test_fs_and_fd(void) {
   }
 
   check(sys_touch(TEST_FILE, str_len(TEST_FILE)) == 0, "touch", 0);
+  check(sys_touch(TEST_FILE_UNLINK, str_len(TEST_FILE_UNLINK)) == 0, "touch_unlink", 0);
   check(sys_write_file(TEST_FILE, str_len(TEST_FILE), "alpha", 5) == 0, "write_file", 0);
   check(sys_push_file(TEST_FILE, str_len(TEST_FILE), "beta", 4) == 0, "push_file", 0);
   check(faccessat(AT_FDCWD, TEST_FILE, F_OK, 0) == 0, "faccessat_fok", 0);
   check(faccessat(AT_FDCWD, TEST_FILE, R_OK | W_OK, 0) == 0, "faccessat_rw", 0);
   check(faccessat(AT_FDCWD, TEST_FILE, X_OK, 0) == -1, "faccessat_xfail", 0);
+  check(unlinkat(AT_FDCWD, TEST_FILE_UNLINK, 0) == 0, "unlinkat", 0);
+  check(faccessat(AT_FDCWD, TEST_FILE_UNLINK, F_OK, 0) == -1, "unlinkat_gone", 0);
 
   int fd = sys_open(TEST_FILE, str_len(TEST_FILE));
   check(fd >= 3, "open", fd);
@@ -281,6 +324,16 @@ static void test_processes(void) {
   if (pid > 0) {
     long code = sys_waitpid(pid);
     check(code == 42, "waitpid_fork", code);
+  }
+
+  int exit_group_pid = fork();
+  if (exit_group_pid == 0) {
+    sys_exit_group(17);
+  }
+  check(exit_group_pid > 0, "fork_exit_group_parent", exit_group_pid);
+  if (exit_group_pid > 0) {
+    long code = sys_waitpid(exit_group_pid);
+    check(code == 17, "waitpid_exit_group", code);
   }
 
   long exec_pid = sys_exec(CHILD_FILE, str_len(CHILD_FILE));
