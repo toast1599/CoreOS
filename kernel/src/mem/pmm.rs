@@ -178,3 +178,7 @@ pub unsafe fn is_frame_free_at(phys_addr: usize) -> bool {
 pub fn free_bytes() -> usize {
     unsafe { FREE_FRAMES * PAGE_SIZE }
 }
+
+pub fn total_bytes() -> usize {
+    unsafe { TOTAL_FRAMES * PAGE_SIZE }
+}

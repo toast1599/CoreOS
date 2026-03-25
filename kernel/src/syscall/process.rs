@@ -1,20 +1,10 @@
+use crate::arch::paging;
 use crate::proc;
 use crate::proc::scheduler;
 use crate::proc::task;
-use crate::mem::pmm;
-use crate::arch::paging;
-use crate::syscall::fs;
-
-const PROT_EXEC: u32 = 0x1;
-const PROT_WRITE: u32 = 0x2;
-const MAP_PRIVATE: u32 = 0x02;
-const MAP_FIXED: u32 = 0x10;
-const MAP_ANONYMOUS: u32 = 0x20;
-const MAP_FAILED: u64 = u64::MAX;
-const CLOCK_REALTIME: u64 = 0;
-const CLOCK_MONOTONIC: u64 = 1;
-const NANOS_PER_SEC: u64 = 1_000_000_000;
-const PIT_HZ: u64 = 100;
+use crate::syscall::helpers;
+use crate::syscall::result::{self, SysError, SysResult};
+use crate::syscall::types::{SigAction, SigSet};
 const O_CLOEXEC: u64 = 0o2000000;
 const O_APPEND: u64 = 0o2000;
 const O_NONBLOCK: u64 = 0o4000;
@@ -26,358 +16,411 @@ const F_GETFL: u64 = 3;
 const F_SETFL: u64 = 4;
 const F_DUPFD_CLOEXEC: u64 = 1030;
 const FCNTL_STATUS_MASK: u32 = (O_APPEND | O_NONBLOCK) as u32;
-
-#[repr(C)]
-struct MmapArgs {
-    addr: u64,
-    len: u64,
-    prot: u32,
-    flags: u32,
-    fd: i32,
-    off: i64,
-}
-
-#[repr(C)]
-struct Timespec {
-    tv_sec: i64,
-    tv_nsec: i64,
-}
+const SIGSET_SIZE: u64 = core::mem::size_of::<SigSet>() as u64;
+const SA_RESTORER: u64 = 0x0400_0000;
+const UMASK_MASK: u32 = 0o777;
 
 pub unsafe fn syscall_exec(path_ptr: u64, path_len: u64) -> u64 {
-    if path_len == 0 || path_len > 64 {
-        return 0;
-    }
-    let mut raw = [0u8; 64];
-    if crate::usercopy::copy_from_user(&mut raw[..path_len as usize], path_ptr).is_err() {
-        return 0;
-    }
-    let mut name_buf = ['\0'; 64];
-    for i in 0..path_len as usize {
-        name_buf[i] = raw[i] as char;
-    }
-    let name = &name_buf[..path_len as usize];
-    let elf_bytes = match fs::fs_clone_by_name(name) {
+    result::ret(syscall_exec_impl(path_ptr, path_len))
+}
+
+unsafe fn syscall_exec_impl(path_ptr: u64, path_len: u64) -> SysResult {
+    let (name_buf, name_len) =
+        result::option(helpers::copy_path_from_user(path_ptr, path_len), SysError::Fault)?;
+    let elf_bytes = match crate::vfs::clone_bytes(&name_buf[..name_len]) {
         Some(v) => v,
         None => {
             crate::dbg_log!("SYSCALL", "exec: file not found");
-            return 0;
+            return result::err(SysError::NoEntry);
         }
     };
     let (pid, _slot) = crate::proc::exec::exec_as_task(elf_bytes.as_slice());
-    pid as u64
+    result::ensure(pid != 0, SysError::Invalid)?;
+    result::ok(pid as u64)
+}
+
+pub unsafe fn syscall_close(fd: u64) -> u64 {
+    result::ret(syscall_close_impl(fd))
+}
+
+unsafe fn syscall_close_impl(fd: u64) -> SysResult {
+    result::ensure(proc::close_descriptor(fd as usize), SysError::BadFd)?;
+    result::ok(0u64)
 }
 
 pub unsafe fn syscall_getpid() -> u64 {
     proc::current_pid() as u64
 }
 
-pub unsafe fn syscall_fork(frame_ptr: u64) -> u64 {
-    if frame_ptr == 0 {
-        return u64::MAX;
+pub unsafe fn syscall_getppid() -> u64 {
+    proc::current_ppid() as u64
+}
+
+pub unsafe fn syscall_gettid() -> u64 {
+    proc::current_pid() as u64
+}
+
+pub unsafe fn syscall_getuid() -> u64 {
+    proc::current_process().map(|p| p.uid as u64).unwrap_or(0)
+}
+
+pub unsafe fn syscall_geteuid() -> u64 {
+    proc::current_process().map(|p| p.euid as u64).unwrap_or(0)
+}
+
+pub unsafe fn syscall_getgid() -> u64 {
+    proc::current_process().map(|p| p.gid as u64).unwrap_or(0)
+}
+
+pub unsafe fn syscall_getegid() -> u64 {
+    proc::current_process().map(|p| p.egid as u64).unwrap_or(0)
+}
+
+pub unsafe fn syscall_setuid(uid: u64) -> u64 {
+    result::ret(syscall_setuid_impl(uid))
+}
+
+unsafe fn syscall_setuid_impl(uid: u64) -> SysResult {
+    let process = result::option(proc::current_process_mut(), SysError::Invalid)?;
+    process.uid = uid as u32;
+    process.euid = uid as u32;
+    result::ok(0u64)
+}
+
+pub unsafe fn syscall_setgid(gid: u64) -> u64 {
+    result::ret(syscall_setgid_impl(gid))
+}
+
+unsafe fn syscall_setgid_impl(gid: u64) -> SysResult {
+    let process = result::option(proc::current_process_mut(), SysError::Invalid)?;
+    process.gid = gid as u32;
+    process.egid = gid as u32;
+    result::ok(0u64)
+}
+
+pub unsafe fn syscall_set_tid_address(tidptr: u64) -> u64 {
+    result::ret(syscall_set_tid_address_impl(tidptr))
+}
+
+unsafe fn syscall_set_tid_address_impl(tidptr: u64) -> SysResult {
+    let process = result::option(proc::current_process_mut(), SysError::Invalid)?;
+    process.clear_child_tid = tidptr;
+    result::ok(proc::current_pid() as u64)
+}
+
+pub unsafe fn syscall_kill(pid: u64, sig: u64) -> u64 {
+    result::ret(syscall_kill_impl(pid, sig))
+}
+
+unsafe fn syscall_kill_impl(pid: u64, sig: u64) -> SysResult {
+    let slot = result::option(proc::find_slot_by_pid(pid as usize), SysError::NoEntry)?;
+    if sig == 0 {
+        return result::ok(0u64);
+    }
+    result::ensure(matches!(sig, 9 | 15), SysError::Unsupported)?;
+
+    if let Some(process) = proc::current_process_mut() {
+        if process.pid == pid as usize {
+            process.state = proc::ProcessState::Zombie;
+            process.exit_code = 128 + sig as i64;
+            task::kill_task(slot);
+            return result::ok(0u64);
+        }
     }
 
+    result::err(SysError::Unsupported)
+}
+
+pub unsafe fn syscall_getpgrp() -> u64 {
+    proc::current_process().map(|p| p.pgid as u64).unwrap_or(0)
+}
+
+pub unsafe fn syscall_getpgid(pid: u64) -> u64 {
+    result::ret(syscall_getpgid_impl(pid))
+}
+
+unsafe fn syscall_getpgid_impl(pid: u64) -> SysResult {
+    if pid == 0 {
+        return result::ok(proc::current_process().map(|p| p.pgid as u64).unwrap_or(0));
+    }
+    let slot = result::option(proc::find_slot_by_pid(pid as usize), SysError::NoEntry)?;
+    let process = result::option(proc::PROCESSES[slot].as_ref(), SysError::NoEntry)?;
+    result::ok(process.pgid as u64)
+}
+
+pub unsafe fn syscall_getsid(pid: u64) -> u64 {
+    result::ret(syscall_getsid_impl(pid))
+}
+
+unsafe fn syscall_getsid_impl(pid: u64) -> SysResult {
+    if pid == 0 {
+        return result::ok(proc::current_process().map(|p| p.sid as u64).unwrap_or(0));
+    }
+    let slot = result::option(proc::find_slot_by_pid(pid as usize), SysError::NoEntry)?;
+    let process = result::option(proc::PROCESSES[slot].as_ref(), SysError::NoEntry)?;
+    result::ok(process.sid as u64)
+}
+
+pub unsafe fn syscall_setpgid(pid: u64, pgid: u64) -> u64 {
+    result::ret(syscall_setpgid_impl(pid, pgid))
+}
+
+unsafe fn syscall_setpgid_impl(pid: u64, pgid: u64) -> SysResult {
+    let current_pid = proc::current_pid();
+    let target_pid = if pid == 0 { current_pid } else { pid as usize };
+    result::ensure(target_pid == current_pid, SysError::Unsupported)?;
+
+    let process = result::option(proc::current_process_mut(), SysError::Invalid)?;
+    let new_pgid = if pgid == 0 { target_pid } else { pgid as usize };
+    result::ensure(new_pgid != 0, SysError::Invalid)?;
+    result::ensure(
+        new_pgid == target_pid || new_pgid == process.pgid,
+        SysError::Unsupported,
+    )?;
+    process.pgid = new_pgid;
+    result::ok(0u64)
+}
+
+pub unsafe fn syscall_umask(mask: u64) -> u64 {
+    result::ret(syscall_umask_impl(mask))
+}
+
+unsafe fn syscall_umask_impl(mask: u64) -> SysResult {
+    let process = result::option(proc::current_process_mut(), SysError::Invalid)?;
+    let old = process.umask;
+    process.umask = (mask as u32) & UMASK_MASK;
+    result::ok(old as u64)
+}
+
+pub unsafe fn syscall_getresuid(ruid_ptr: u64, euid_ptr: u64, suid_ptr: u64) -> u64 {
+    result::ret(syscall_getresuid_impl(ruid_ptr, euid_ptr, suid_ptr))
+}
+
+unsafe fn syscall_getresuid_impl(ruid_ptr: u64, euid_ptr: u64, suid_ptr: u64) -> SysResult {
+    let process = result::option(proc::current_process(), SysError::Invalid)?;
+    result::ensure(
+        helpers::copy_struct_to_user(ruid_ptr, &process.uid),
+        SysError::Fault,
+    )?;
+    result::ensure(
+        helpers::copy_struct_to_user(euid_ptr, &process.euid),
+        SysError::Fault,
+    )?;
+    result::ensure(
+        helpers::copy_struct_to_user(suid_ptr, &process.euid),
+        SysError::Fault,
+    )?;
+    result::ok(0u64)
+}
+
+pub unsafe fn syscall_getresgid(rgid_ptr: u64, egid_ptr: u64, sgid_ptr: u64) -> u64 {
+    result::ret(syscall_getresgid_impl(rgid_ptr, egid_ptr, sgid_ptr))
+}
+
+unsafe fn syscall_getresgid_impl(rgid_ptr: u64, egid_ptr: u64, sgid_ptr: u64) -> SysResult {
+    let process = result::option(proc::current_process(), SysError::Invalid)?;
+    result::ensure(
+        helpers::copy_struct_to_user(rgid_ptr, &process.gid),
+        SysError::Fault,
+    )?;
+    result::ensure(
+        helpers::copy_struct_to_user(egid_ptr, &process.egid),
+        SysError::Fault,
+    )?;
+    result::ensure(
+        helpers::copy_struct_to_user(sgid_ptr, &process.egid),
+        SysError::Fault,
+    )?;
+    result::ok(0u64)
+}
+
+pub unsafe fn syscall_rt_sigaction(sig: u64, act: u64, oldact: u64, sigsetsize: u64) -> u64 {
+    result::ret(syscall_rt_sigaction_impl(sig, act, oldact, sigsetsize))
+}
+
+unsafe fn syscall_rt_sigaction_impl(sig: u64, act: u64, oldact: u64, sigsetsize: u64) -> SysResult {
+    result::ensure(sig > 0 && sig < 65, SysError::Invalid)?;
+    result::ensure(sigsetsize == SIGSET_SIZE, SysError::Invalid)?;
+    if act != 0 {
+        let new_action: SigAction =
+            result::option(helpers::copy_struct_from_user(act), SysError::Fault)?;
+        result::ensure(
+            (new_action.flags & !SA_RESTORER) == 0,
+            SysError::Unsupported,
+        )?;
+    }
+    if oldact != 0 {
+        let current = SigAction {
+            handler: 0,
+            flags: 0,
+            restorer: 0,
+            mask: SigSet { bits: [0; 16] },
+        };
+        result::ensure(
+            helpers::copy_struct_to_user(oldact, &current),
+            SysError::Fault,
+        )?;
+    }
+    result::ok(0u64)
+}
+
+pub unsafe fn syscall_rt_sigprocmask(how: u64, set: u64, oldset: u64, sigsetsize: u64) -> u64 {
+    result::ret(syscall_rt_sigprocmask_impl(how, set, oldset, sigsetsize))
+}
+
+unsafe fn syscall_rt_sigprocmask_impl(how: u64, set: u64, oldset: u64, sigsetsize: u64) -> SysResult {
+    result::ensure(sigsetsize == SIGSET_SIZE, SysError::Invalid)?;
+    result::ensure(how <= 2, SysError::Invalid)?;
+    if set != 0 {
+        let _: SigSet = result::option(helpers::copy_struct_from_user(set), SysError::Fault)?;
+    }
+    if oldset != 0 {
+        let empty = SigSet { bits: [0; 16] };
+        result::ensure(helpers::copy_struct_to_user(oldset, &empty), SysError::Fault)?;
+    }
+    result::ok(0u64)
+}
+
+pub unsafe fn syscall_fork(frame_ptr: u64) -> u64 {
+    result::ret(syscall_fork_impl(frame_ptr))
+}
+
+unsafe fn syscall_fork_impl(frame_ptr: u64) -> SysResult {
+    result::ensure(frame_ptr != 0, SysError::Invalid)?;
+
     let child_pml4 = paging::clone_user_address_space(task::current_pml4());
-    let child_slot = match task::spawn_forked_task(frame_ptr as *const u8, child_pml4) {
-        Some(s) => s,
-        None => return u64::MAX,
-    };
+    let child_slot = result::option(
+        task::spawn_forked_task(frame_ptr as *const u8, child_pml4),
+        SysError::Invalid,
+    )?;
     let child_pid = proc::fork_current(child_slot, child_pml4);
-    child_pid as u64
+    result::ok(child_pid as u64)
 }
 
 pub unsafe fn syscall_dup(oldfd: u64) -> u64 {
-    let fd = proc::dup_fd(oldfd as usize, 0, None, false);
-    if fd < 0 {
-        u64::MAX
-    } else {
-        fd as u64
-    }
+    result::ret(syscall_dup_impl(oldfd))
+}
+
+unsafe fn syscall_dup_impl(oldfd: u64) -> SysResult {
+    result::ok(result::option(proc::dup_min(oldfd as usize, 0, false), SysError::BadFd)? as u64)
 }
 
 pub unsafe fn syscall_dup3(oldfd: u64, newfd: u64, flags: u64) -> u64 {
-    if flags & !O_CLOEXEC != 0 {
-        return u64::MAX;
-    }
+    result::ret(syscall_dup3_impl(oldfd, newfd, flags))
+}
+
+unsafe fn syscall_dup3_impl(oldfd: u64, newfd: u64, flags: u64) -> SysResult {
+    result::ensure(flags & !O_CLOEXEC == 0, SysError::Invalid)?;
     let cloexec = (flags & O_CLOEXEC) != 0;
     let fd = if oldfd == newfd {
-        match proc::get_fd_target(oldfd as usize) {
-            Some(_) => {
-                if cloexec {
-                    if !proc::set_fd_flags(oldfd as usize, proc::FD_CLOEXEC) {
-                        -1
-                    } else {
-                        oldfd as i64
-                    }
-                } else {
-                    oldfd as i64
-                }
-            }
-            None => -1,
+        if !proc::fd_exists(oldfd as usize) {
+            None
+        } else if !proc::set_cloexec(oldfd as usize, cloexec) {
+            None
+        } else {
+            Some(oldfd as usize)
         }
     } else {
-        proc::dup_fd(oldfd as usize, 0, Some(newfd as usize), cloexec)
+        proc::dup_exact(oldfd as usize, newfd as usize, cloexec)
     };
-    if fd < 0 {
-        u64::MAX
-    } else {
-        fd as u64
-    }
+    result::ok(result::option(fd, SysError::BadFd)? as u64)
 }
 
 pub unsafe fn syscall_fcntl(fd: u64, cmd: u64, arg: u64) -> u64 {
+    result::ret(syscall_fcntl_impl(fd, cmd, arg))
+}
+
+unsafe fn syscall_fcntl_impl(fd: u64, cmd: u64, arg: u64) -> SysResult {
     match cmd {
         F_DUPFD => {
-            let new_fd = proc::dup_fd(fd as usize, arg as usize, None, false);
-            if new_fd < 0 { u64::MAX } else { new_fd as u64 }
+            result::ok(result::option(proc::dup_min(fd as usize, arg as usize, false), SysError::BadFd)? as u64)
         }
         F_DUPFD_CLOEXEC => {
-            let new_fd = proc::dup_fd(fd as usize, arg as usize, None, true);
-            if new_fd < 0 { u64::MAX } else { new_fd as u64 }
+            result::ok(result::option(proc::dup_min(fd as usize, arg as usize, true), SysError::BadFd)? as u64)
         }
-        F_GETFD => match proc::get_fd_flags(fd as usize) {
-            Some(flags) => flags as u64,
-            None => u64::MAX,
-        },
+        F_GETFD => result::ok(
+            result::option(proc::get_fd_flags(fd as usize), SysError::BadFd)? as u64,
+        ),
         F_SETFD => {
-            let flags = (arg as u32) & proc::FD_CLOEXEC;
-            if proc::set_fd_flags(fd as usize, flags) {
-                0
-            } else {
-                u64::MAX
-            }
+            let cloexec = (arg as u32 & proc::FD_CLOEXEC) != 0;
+            result::ensure(proc::set_cloexec(fd as usize, cloexec), SysError::BadFd)?;
+            result::ok(0u64)
         }
-        F_GETFL => match proc::get_status_flags(fd as usize) {
-            Some(flags) => (flags as u64) | O_RDONLY,
-            None => u64::MAX,
-        },
+        F_GETFL => result::ok(
+            (result::option(proc::get_status_flags(fd as usize), SysError::BadFd)? as u64)
+                | O_RDONLY,
+        ),
         F_SETFL => {
             let flags = (arg as u32) & FCNTL_STATUS_MASK;
-            if proc::set_status_flags(fd as usize, flags) {
-                0
-            } else {
-                u64::MAX
-            }
+            result::ensure(proc::set_status_flags(fd as usize, flags), SysError::BadFd)?;
+            result::ok(0u64)
         }
-        _ => u64::MAX,
+        _ => result::err(SysError::Unsupported),
     }
 }
 
 pub unsafe fn syscall_pipe(pipefd_ptr: u64) -> u64 {
-    if !crate::usercopy::user_range_ok(pipefd_ptr, core::mem::size_of::<[i32; 2]>()) {
-        return u64::MAX;
-    }
-    let (read_fd, write_fd) = match proc::alloc_pipe() {
-        Some(pair) => pair,
-        None => return u64::MAX,
-    };
+    result::ret(syscall_pipe_impl(pipefd_ptr))
+}
+
+unsafe fn syscall_pipe_impl(pipefd_ptr: u64) -> SysResult {
+    result::ensure(
+        crate::usercopy::user_range_ok(pipefd_ptr, core::mem::size_of::<[i32; 2]>()),
+        SysError::Fault,
+    )?;
+    let (read_fd, write_fd) = result::option(proc::create_pipe_pair(), SysError::Invalid)?;
     let pipefds = [read_fd as i32, write_fd as i32];
     let bytes = core::slice::from_raw_parts(
         (&pipefds as *const [i32; 2]).cast::<u8>(),
         core::mem::size_of::<[i32; 2]>(),
     );
     if crate::usercopy::copy_to_user(pipefd_ptr, bytes).is_err() {
-        let _ = proc::close_fd(read_fd);
-        let _ = proc::close_fd(write_fd);
-        return u64::MAX;
+        let _ = proc::close_descriptor(read_fd);
+        let _ = proc::close_descriptor(write_fd);
+        return result::err(SysError::Fault);
     }
-    0
+    result::ok(0u64)
 }
 
-fn map_flags_from_prot(prot: u32) -> paging::MapFlags {
-    paging::MapFlags {
-        writable: (prot & PROT_WRITE) != 0,
-        user: true,
-        executable: (prot & PROT_EXEC) != 0,
-    }
+pub unsafe fn syscall_pipe2(pipefd_ptr: u64, flags: u64) -> u64 {
+    result::ret(syscall_pipe2_impl(pipefd_ptr, flags))
 }
 
-pub unsafe fn syscall_mmap(args_ptr: u64) -> u64 {
-    if !crate::usercopy::user_range_ok(args_ptr, core::mem::size_of::<MmapArgs>()) {
-        return MAP_FAILED;
-    }
+unsafe fn syscall_pipe2_impl(pipefd_ptr: u64, flags: u64) -> SysResult {
+    result::ensure(flags & !(O_CLOEXEC | O_NONBLOCK) == 0, SysError::Invalid)?;
+    syscall_pipe_impl(pipefd_ptr)?;
 
-    let mut raw = [0u8; core::mem::size_of::<MmapArgs>()];
-    if crate::usercopy::copy_from_user(&mut raw, args_ptr).is_err() {
-        return MAP_FAILED;
-    }
-    let args = core::ptr::read_unaligned(raw.as_ptr().cast::<MmapArgs>());
-
-    if args.len == 0 {
-        return MAP_FAILED;
-    }
-    if (args.flags & MAP_PRIVATE) == 0 || (args.flags & MAP_ANONYMOUS) == 0 {
-        return MAP_FAILED;
-    }
-    if args.fd != -1 || args.off != 0 {
-        return MAP_FAILED;
-    }
-
-    let len = ((args.len as usize) + 0xFFF) & !0xFFF;
-    let start = if args.addr == 0 {
-        match proc::reserve_mmap_base(len) {
-            Some(s) => s,
-            None => return MAP_FAILED,
-        }
-    } else {
-        let addr = (args.addr as usize) & !0xFFF;
-        if (args.flags & MAP_FIXED) == 0 || proc::region_conflicts(addr, len) {
-            return MAP_FAILED;
-        }
-        addr
-    };
-
-    if proc::region_conflicts(start, len) {
-        return MAP_FAILED;
-    }
-    if !proc::alloc_vma(start, len, args.prot, args.flags) {
-        return MAP_FAILED;
-    }
-
-    let pml4 = task::current_pml4();
-    let flags = map_flags_from_prot(args.prot);
-    for off in (0..len).step_by(0x1000) {
-        let frame = pmm::alloc_frame();
-        if frame == 0 {
-            return MAP_FAILED;
-        }
-        paging::map_page_in(pml4, start + off, frame, flags);
-        core::ptr::write_bytes(paging::p2v(frame) as *mut u8, 0, 0x1000);
-    }
-    start as u64
-}
-
-pub unsafe fn syscall_munmap(addr: u64, len: u64) -> u64 {
-    if addr == 0 || len == 0 {
-        return u64::MAX;
-    }
-    let start = (addr as usize) & !0xFFF;
-    let len = ((len as usize) + 0xFFF) & !0xFFF;
-
-    let pml4 = task::current_pml4();
-    let vma = match proc::find_vma_exact_mut(start, len) {
-        Some(v) => v,
-        None => return u64::MAX,
-    };
-
-    for off in (0..len).step_by(0x1000) {
-        if let Some(frame) = paging::unmap_page_in(pml4, start + off) {
-            pmm::free_frame(frame);
-        }
-    }
-    *vma = proc::VmRegion::empty();
-    0
-}
-
-pub unsafe fn syscall_mprotect(addr: u64, len: u64, prot: u64) -> u64 {
-    if addr == 0 || len == 0 {
-        return u64::MAX;
-    }
-    let start = (addr as usize) & !0xFFF;
-    let len = ((len as usize) + 0xFFF) & !0xFFF;
-
-    let pml4 = task::current_pml4();
-    let vma = match proc::find_vma_exact_mut(start, len) {
-        Some(v) => v,
-        None => return u64::MAX,
-    };
-    let flags = map_flags_from_prot(prot as u32);
-    for off in (0..len).step_by(0x1000) {
-        if !paging::protect_page_in(pml4, start + off, flags) {
-            return u64::MAX;
-        }
-    }
-    vma.prot = prot as u32;
-    0
-}
-
-pub unsafe fn syscall_clock_gettime(clockid: u64, tp_ptr: u64) -> u64 {
-    if !matches!(clockid, CLOCK_REALTIME | CLOCK_MONOTONIC) {
-        return u64::MAX;
-    }
-    if !crate::usercopy::user_range_ok(tp_ptr, core::mem::size_of::<Timespec>()) {
-        return u64::MAX;
-    }
-
-    let ticks = crate::hw::pit::ticks();
-    let sec = (ticks / PIT_HZ) as i64;
-    let nsec = ((ticks % PIT_HZ) * (NANOS_PER_SEC / PIT_HZ)) as i64;
-    let ts = Timespec {
-        tv_sec: sec,
-        tv_nsec: nsec,
-    };
-    let bytes = core::slice::from_raw_parts(
-        (&ts as *const Timespec).cast::<u8>(),
-        core::mem::size_of::<Timespec>(),
+    let mut pipefds = [0i32; 2];
+    let raw = core::slice::from_raw_parts_mut(
+        pipefds.as_mut_ptr().cast::<u8>(),
+        core::mem::size_of::<[i32; 2]>(),
     );
-    if crate::usercopy::copy_to_user(tp_ptr, bytes).is_err() {
-        return u64::MAX;
-    }
-    0
-}
+    result::ensure(
+        crate::usercopy::copy_from_user(raw, pipefd_ptr).is_ok(),
+        SysError::Fault,
+    )?;
 
-pub unsafe fn syscall_nanosleep(req_ptr: u64, rem_ptr: u64) -> u64 {
-    if !crate::usercopy::user_range_ok(req_ptr, core::mem::size_of::<Timespec>()) {
-        return u64::MAX;
-    }
-
-    let mut raw = [0u8; core::mem::size_of::<Timespec>()];
-    if crate::usercopy::copy_from_user(&mut raw, req_ptr).is_err() {
-        return u64::MAX;
-    }
-    let req = core::ptr::read_unaligned(raw.as_ptr().cast::<Timespec>());
-    if req.tv_sec < 0 || req.tv_nsec < 0 || req.tv_nsec >= NANOS_PER_SEC as i64 {
-        return u64::MAX;
-    }
-
-    let total_ns = (req.tv_sec as u64)
-        .saturating_mul(NANOS_PER_SEC)
-        .saturating_add(req.tv_nsec as u64);
-    let ticks = total_ns.div_ceil(NANOS_PER_SEC / PIT_HZ);
-    crate::hw::pit::sleep_yield(ticks);
-
-    if rem_ptr != 0 {
-        if !crate::usercopy::user_range_ok(rem_ptr, core::mem::size_of::<Timespec>()) {
-            return u64::MAX;
+    for &fd in &pipefds {
+        let fd = fd as usize;
+        if (flags & O_CLOEXEC) != 0 {
+            result::ensure(proc::set_cloexec(fd, true), SysError::BadFd)?;
         }
-        let rem = Timespec {
-            tv_sec: 0,
-            tv_nsec: 0,
-        };
-        let rem_bytes = core::slice::from_raw_parts(
-            (&rem as *const Timespec).cast::<u8>(),
-            core::mem::size_of::<Timespec>(),
-        );
-        if crate::usercopy::copy_to_user(rem_ptr, rem_bytes).is_err() {
-            return u64::MAX;
+        if (flags & O_NONBLOCK) != 0 {
+            result::ensure(proc::set_status_flags(fd, O_NONBLOCK as u32), SysError::BadFd)?;
         }
     }
-
-    0
+    result::ok(0u64)
 }
 
 pub unsafe fn syscall_waitpid(pid: u64) -> u64 {
-    let target_pid = pid as usize;
-    let self_slot = match task::current_task_slot() {
-        Some(s) => s,
-        None => return u64::MAX,
-    };
-    let mut slot = None;
-    for i in 0..8 {
-        if let Some(ref p) = proc::PROCESSES[i] {
-            if p.pid == target_pid {
-                if i == self_slot {
-                    return u64::MAX;
-                }
-                slot = Some(i);
-                break;
-            }
-        }
-    }
+    result::ret(syscall_waitpid_impl(pid))
+}
 
-    let slot = match slot {
-        Some(s) => s,
-        None => return u64::MAX,
-    };
+unsafe fn syscall_waitpid_impl(pid: u64) -> SysResult {
+    let target_pid = pid as usize;
+    let self_slot = result::option(task::current_task_slot(), SysError::Invalid)?;
+    let slot = result::option(proc::find_slot_by_pid(target_pid), SysError::NoEntry)?;
+    result::ensure(slot != self_slot, SysError::Invalid)?;
 
     loop {
         if !proc::is_running_in_slot(slot) {
@@ -386,58 +429,7 @@ pub unsafe fn syscall_waitpid(pid: u64) -> u64 {
         scheduler::yield_now();
         core::hint::spin_loop();
     }
-    match proc::reap_slot(slot) {
-        Some(code) => code as u64,
-        None => u64::MAX,
-    }
-}
-
-pub unsafe fn syscall_brk(addr: u64) -> u64 {
-    let current_brk = proc::current_brk();
-    if addr == 0 {
-        return current_brk as u64;
-    }
-    let new_brk = addr as usize;
-    if new_brk <= current_brk {
-        proc::set_brk(new_brk);
-        return new_brk as u64;
-    }
-
-    let mut page = (current_brk + 0xFFF) & !0xFFF;
-    let end = (new_brk + 0xFFF) & !0xFFF;
-
-    while page < end {
-        let frame = pmm::alloc_frame();
-        if frame == 0 {
-            crate::dbg_log!("BRK", "OOM");
-            return current_brk as u64;
-        }
-        paging::map_page_in(
-            task::current_pml4(),
-            page,
-            frame,
-            paging::MapFlags {
-                writable: true,
-                user: true,
-                executable: false,
-            },
-        );
-        core::ptr::write_bytes(paging::p2v(frame) as *mut u8, 0, 0x1000);
-        page += 0x1000;
-    }
-
-    proc::set_brk(new_brk);
-    new_brk as u64
-}
-
-pub unsafe fn syscall_boottime(buf_ptr: u64, buf_len: u64) -> u64 {
-    let report = crate::bench::report();
-    let bytes = report.as_bytes();
-    let count = (buf_len as usize).min(bytes.len());
-    if crate::usercopy::copy_to_user(buf_ptr, &bytes[..count]).is_err() {
-        return u64::MAX;
-    }
-    count as u64
+    result::ok(result::option(proc::reap_slot(slot), SysError::Invalid)? as u64)
 }
 
 pub unsafe fn syscall_exit(code: u64) -> ! {

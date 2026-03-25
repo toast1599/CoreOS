@@ -1,6 +1,7 @@
 pub mod elf;
 pub mod exec;
 mod fd;
+pub mod fd_io;
 mod process;
 pub mod scheduler;
 pub mod task;
@@ -54,6 +55,13 @@ pub enum FdTarget {
     Open(usize),
     PipeRead(usize),
     PipeWrite(usize),
+}
+
+#[derive(Clone, Copy)]
+pub enum DescriptorInfo {
+    Stdio { index: u8 },
+    File { file_idx: usize, size: usize },
+    Pipe,
 }
 
 #[derive(Clone, Copy)]
@@ -127,9 +135,18 @@ pub enum ProcessState {
 
 pub struct Process {
     pub pid: usize,
+    pub parent_pid: usize,
+    pub pgid: usize,
+    pub sid: usize,
     pub state: ProcessState,
     pub task_slot: usize,
     pub exit_code: i64,
+    pub uid: u32,
+    pub euid: u32,
+    pub gid: u32,
+    pub egid: u32,
+    pub umask: u32,
+    pub clear_child_tid: u64,
     pub program_break: usize,
     pub next_mmap_base: usize,
     pub pml4: usize,
@@ -167,12 +184,13 @@ fn default_fd_flags() -> [u32; MAX_FDS] {
 // ---------------------------------------------------------------------------
 
 pub use fd::{
-    alloc_fd, alloc_pipe, close_fd, dup_fd, fork_current, get_fd, get_fd_flags, get_fd_mut,
-    get_fd_target, get_pipe_mut, get_status_flags, pipe_peer_closed, reap_slot, set_fd_flags,
-    set_status_flags,
+    close_descriptor, create_pipe_pair, dup_exact, dup_min, fd_exists, fork_current,
+    get_fd_flags, get_status_flags, is_stdin, is_stdout_or_stderr, open_file, read_file,
+    read_pipe, reap_slot, seek, set_cloexec, set_status_flags, write_pipe,
 };
+pub use fd::{descriptor_info, file_size};
 pub use process::{
-    current_brk, current_pid, current_process, current_process_mut, exit, is_running_in_slot,
-    set_brk, spawn,
+    current_brk, current_pid, current_ppid, current_process, current_process_mut, exit,
+    find_slot_by_pid, is_running_in_slot, set_brk, spawn, active_process_count,
 };
 pub use vm::{alloc_vma, find_vma_exact_mut, region_conflicts, reserve_mmap_base};

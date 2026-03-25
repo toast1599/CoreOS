@@ -76,6 +76,47 @@ static void check(int cond, const char *name, long detail) {
 static void test_basic_info(void) {
   long pid = getpid();
   check(pid > 0, "getpid", pid);
+  check(gettid() == pid, "gettid", gettid());
+  check(getuid() == 0 && geteuid() == 0, "getuid_geteuid", getuid() | geteuid());
+  check(getgid() == 0 && getegid() == 0, "getgid_getegid", getgid() | getegid());
+  check(getppid() >= 0, "getppid", getppid());
+  check(getpgrp() == pid, "getpgrp", getpgrp());
+  check(getpgid(0) == pid, "getpgid", getpgid(0));
+  check(getsid(0) == pid, "getsid", getsid(0));
+  check(setpgid(0, 0) == 0 && getpgrp() == pid, "setpgid_self", getpgrp());
+
+  int clear_tid = 0;
+  check(sys_set_tid_address(&clear_tid) == pid, "set_tid_address", clear_tid);
+  check(setuid(7) == 0 && getuid() == 7 && geteuid() == 7, "setuid", getuid());
+  check(setgid(9) == 0 && getgid() == 9 && getegid() == 9, "setgid", getgid());
+  check(setuid(0) == 0 && setgid(0) == 0, "reset_ids", 0);
+
+  char cwd[8];
+  char *cwd_rc = getcwd(cwd, sizeof(cwd));
+  check(cwd_rc == cwd && cwd[0] == '/' && cwd[1] == '\0', "getcwd", cwd[0]);
+  check(chdir(".") == 0, "chdir_dot", 0);
+
+  struct rlimit rl;
+  check(getrlimit(7, &rl) == 0 && rl.rlim_cur >= 16, "getrlimit_nofile", rl.rlim_cur);
+  int ruid = -1, euid = -1, suid = -1;
+  int rgid = -1, egid = -1, sgid = -1;
+  check(getresuid(&ruid, &euid, &suid) == 0 && ruid == 0 && euid == 0 && suid == 0,
+        "getresuid", ruid | euid | suid);
+  check(getresgid(&rgid, &egid, &sgid) == 0 && rgid == 0 && egid == 0 && sgid == 0,
+        "getresgid", rgid | egid | sgid);
+  check(umask(0022) == 0022, "umask_roundtrip", 0);
+
+  struct sysinfo si;
+  check(sysinfo(&si) == 0 && si.freeram > 0 && si.totalram >= si.freeram && si.procs >= 1,
+        "sysinfo", si.procs);
+
+  stack_t old_ss;
+  check(sigaltstack(0, &old_ss) == 0 && old_ss.ss_flags == 2, "sigaltstack_old", old_ss.ss_flags);
+
+  unsigned long sigmask[16] = {0};
+  check(sys_rt_sigprocmask(0, sigmask, sigmask, 128) == 0, "rt_sigprocmask", sigmask[0]);
+  check(sys_rt_sigaction(2, 0, 0, 128) == 0, "rt_sigaction", 0);
+  check(kill((int)pid, 0) == 0, "kill_probe_self", pid);
 
   long free_mem = sys_meminfo();
   check(free_mem > (64 * 1024 * 1024), "meminfo", free_mem);
@@ -148,6 +189,9 @@ static void test_fs_and_fd(void) {
   check(sys_touch(TEST_FILE, str_len(TEST_FILE)) == 0, "touch", 0);
   check(sys_write_file(TEST_FILE, str_len(TEST_FILE), "alpha", 5) == 0, "write_file", 0);
   check(sys_push_file(TEST_FILE, str_len(TEST_FILE), "beta", 4) == 0, "push_file", 0);
+  check(faccessat(AT_FDCWD, TEST_FILE, F_OK, 0) == 0, "faccessat_fok", 0);
+  check(faccessat(AT_FDCWD, TEST_FILE, R_OK | W_OK, 0) == 0, "faccessat_rw", 0);
+  check(faccessat(AT_FDCWD, TEST_FILE, X_OK, 0) == -1, "faccessat_xfail", 0);
 
   int fd = sys_open(TEST_FILE, str_len(TEST_FILE));
   check(fd >= 3, "open", fd);
@@ -274,6 +318,15 @@ static void test_pipe(void) {
   got = read(pfds[0], buf, sizeof(buf));
   check(got == 0, "pipe_eof_after_close", got);
   check(sys_close(pfds[0]) == 0, "pipe_close_read", 0);
+
+  int p2[2];
+  check(pipe2(p2, O_CLOEXEC | O_NONBLOCK) == 0, "pipe2", 0);
+  check(fcntl(p2[0], F_GETFD, 0) == FD_CLOEXEC && fcntl(p2[1], F_GETFD, 0) == FD_CLOEXEC,
+        "pipe2_cloexec", 0);
+  check((fcntl(p2[0], F_GETFL, 0) & O_NONBLOCK) != 0 &&
+        (fcntl(p2[1], F_GETFL, 0) & O_NONBLOCK) != 0,
+        "pipe2_nonblock", 0);
+  check(sys_close(p2[0]) == 0 && sys_close(p2[1]) == 0, "pipe2_close", 0);
 }
 
 int main(void) {

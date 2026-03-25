@@ -36,6 +36,10 @@ int pipe(int pipefd[2]) {
     return sys_pipe(pipefd);
 }
 
+int pipe2(int pipefd[2], int flags) {
+    return sys_pipe2(pipefd, flags);
+}
+
 ssize_t readv(int fd, const struct iovec *iov, int iovcnt) {
     return sys_readv(fd, iov, iovcnt);
 }
@@ -54,6 +58,95 @@ int fstat(int fd, struct stat *st) {
 
 int getpid(void) {
     return (int)sys_getpid();
+}
+
+int getppid(void) {
+    return (int)sys_getppid();
+}
+
+int getuid(void) {
+    return (int)sys_getuid();
+}
+
+int geteuid(void) {
+    return (int)sys_geteuid();
+}
+
+int getgid(void) {
+    return (int)sys_getgid();
+}
+
+int getegid(void) {
+    return (int)sys_getegid();
+}
+
+int gettid(void) {
+    return (int)sys_gettid();
+}
+
+int setuid(int uid) {
+    return sys_setuid(uid);
+}
+
+int setgid(int gid) {
+    return sys_setgid(gid);
+}
+
+int kill(int pid, int sig) {
+    return sys_kill(pid, sig);
+}
+
+int getpgrp(void) {
+    return (int)sys_getpgrp();
+}
+
+int setpgid(int pid, int pgid) {
+    return sys_setpgid(pid, pgid);
+}
+
+int getpgid(int pid) {
+    return (int)sys_getpgid(pid);
+}
+
+int getsid(int pid) {
+    return (int)sys_getsid(pid);
+}
+
+int getresuid(int *ruid, int *euid, int *suid) {
+    return sys_getresuid(ruid, euid, suid);
+}
+
+int getresgid(int *rgid, int *egid, int *sgid) {
+    return sys_getresgid(rgid, egid, sgid);
+}
+
+char *getcwd(char *buf, size_t size) {
+    return sys_getcwd(buf, size);
+}
+
+int chdir(const char *path) {
+    return sys_chdir(path, str_len(path));
+}
+
+int getrlimit(int resource, struct rlimit *rlim) {
+    return sys_getrlimit(resource, rlim);
+}
+
+int sigaltstack(const stack_t *ss, stack_t *old_ss) {
+    return sys_sigaltstack(ss, old_ss);
+}
+
+unsigned int umask(unsigned int mask) {
+    return sys_umask(mask);
+}
+
+int faccessat(int dirfd, const char *path, int mode, int flags) {
+    if (flags != 0) return -1;
+    return sys_faccessat(dirfd, path, str_len(path), mode);
+}
+
+int sysinfo(struct sysinfo *info) {
+    return sys_sysinfo(info);
 }
 
 void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off) {

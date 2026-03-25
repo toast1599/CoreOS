@@ -26,16 +26,16 @@ all: $(ALL_ELFS)
 start.o: start.asm
 	$(ASM) -f elf64 start.asm -o start.o
 
-shell.o: shell.c libcshim/libcshim.h
+shell.o: shell.c libcshim/libcshim.h libcshim/sysnr.h
 	$(CC) $(CFLAGS) -c shell.c -o shell.o
 
-syscall_test.o: syscall_test.c libcshim/libcshim.h
+syscall_test.o: syscall_test.c libcshim/libcshim.h libcshim/sysnr.h
 	$(CC) $(CFLAGS) -c syscall_test.c -o syscall_test.o
 
-syscall_child.o: syscall_child.c libcshim/libcshim.h
+syscall_child.o: syscall_child.c libcshim/libcshim.h libcshim/sysnr.h
 	$(CC) $(CFLAGS) -c syscall_child.c -o syscall_child.o
 
-libcshim/libcshim.o: libcshim/libcshim.c libcshim/libcshim.h
+libcshim/libcshim.o: libcshim/libcshim.c libcshim/libcshim.h libcshim/sysnr.h
 	$(CC) $(CFLAGS) -c libcshim/libcshim.c -o libcshim/libcshim.o
 
 shell.elf: $(COMMON_OBJS) shell.o shell.ld

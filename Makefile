@@ -5,6 +5,9 @@
 BUILD_DIR = build
 ESP_DIR   = $(BUILD_DIR)/esp
 EFI_BOOT  = $(ESP_DIR)/EFI/BOOT
+SYSCALL_DEF = abi/syscalls.def
+SYSCALL_GEN = tools/generate_syscalls.py
+SYSCALL_OUT = kernel/src/syscall/nr.rs kernel/src/syscall/dispatch.rs user/libcshim/sysnr.h
 
 IMAGE     = $(BUILD_DIR)/coreos.img
 USER_ELFS = user/shell.elf user/syscall_test.elf user/syscall_child.elf
@@ -32,9 +35,14 @@ LDFLAGS = /subsystem:efi_application \
           /entry:efi_main \
           /base:0x0
 
-.PHONY: all clean run dirs
+.PHONY: all clean run dirs syscall-api
 
 all: $(IMAGE)
+
+syscall-api: $(SYSCALL_OUT)
+
+$(SYSCALL_OUT): $(SYSCALL_DEF) $(SYSCALL_GEN)
+	python3 $(SYSCALL_GEN)
 
 # =========================
 # Create Build Directories
@@ -47,7 +55,7 @@ dirs:
 # Build Rust Kernel
 # =========================
 
-$(KERNEL_BIN): dirs $(USER_ELFS)
+$(KERNEL_BIN): dirs $(SYSCALL_OUT) $(USER_ELFS)
 	cd kernel && \
 	cargo +nightly build --release \
 	    -Zbuild-std=core,alloc \
@@ -79,7 +87,7 @@ $(IMAGE): $(KERNEL_BIN) $(LOADER_EFI) $(USER_ELFS)
 	mcopy -i $(IMAGE) user/syscall_child.elf ::/syscall_child.elf
 	mcopy -i $(IMAGE) assets/font.psfu ::/
 
-$(USER_ELFS): dirs
+$(USER_ELFS): dirs $(SYSCALL_OUT)
 	$(MAKE) -C user
 		
 # =========================

@@ -40,3 +40,23 @@ pub fn append_all(name: &[char], bytes: &[u8]) -> bool {
     })
     .unwrap_or(false)
 }
+
+pub fn remove(name: &[char]) -> bool {
+    with_fs_mut(|fs| fs.remove(name)).unwrap_or(false)
+}
+
+pub fn replace_all(name: &[char], bytes: &[u8]) -> bool {
+    with_fs_mut(|fs| {
+        let Some(file) = fs.find_mut(name) else {
+            return false;
+        };
+        file.data.clear();
+        file.data.extend_from_slice(bytes);
+        true
+    })
+    .unwrap_or(false)
+}
+
+pub fn list() -> Option<Vec<File>> {
+    with_fs(|fs| fs.files.clone())
+}

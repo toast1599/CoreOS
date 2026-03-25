@@ -23,6 +23,17 @@ pub unsafe fn yield_now() {
     IN_SYSCALL.store(in_syscall, Ordering::Relaxed);
 }
 
+pub unsafe fn wait_for_event(spins: usize) {
+    let in_syscall = IN_SYSCALL.load(Ordering::Relaxed);
+    IN_SYSCALL.store(false, Ordering::Relaxed);
+    core::arch::asm!("sti", options(nostack, nomem));
+    for _ in 0..spins {
+        core::hint::spin_loop();
+    }
+    core::arch::asm!("cli", options(nostack, nomem));
+    IN_SYSCALL.store(in_syscall, Ordering::Relaxed);
+}
+
 // TICKS is now centrally located in hw::pit::TICKS
 
 /// Called from the PIT interrupt handler (pit_handler in pit.rs).

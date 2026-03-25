@@ -7,11 +7,21 @@ use super::{
 
 pub unsafe fn spawn(task_slot: usize, pml4: usize) -> usize {
     let pid = NEXT_PID.fetch_add(1, Ordering::Relaxed);
+    let parent_pid = current_pid();
     PROCESSES[task_slot] = Some(Process {
         pid,
+        parent_pid,
+        pgid: pid,
+        sid: pid,
         state: ProcessState::Running,
         task_slot,
         exit_code: 0,
+        uid: 0,
+        euid: 0,
+        gid: 0,
+        egid: 0,
+        umask: 0o022,
+        clear_child_tid: 0,
         program_break: 0x4000_0000,
         next_mmap_base: MMAP_BASE,
         pml4,
@@ -39,6 +49,19 @@ pub unsafe fn current_pid() -> usize {
         }
     }
     0
+}
+
+pub unsafe fn current_ppid() -> usize {
+    if let Some(slot) = task::current_task_slot() {
+        if let Some(ref p) = PROCESSES[slot] {
+            return p.parent_pid;
+        }
+    }
+    0
+}
+
+pub unsafe fn active_process_count() -> usize {
+    PROCESSES.iter().filter(|process| process.is_some()).count()
 }
 
 pub unsafe fn set_brk(new_brk: usize) {
@@ -85,4 +108,14 @@ pub fn is_running_in_slot(slot: usize) -> bool {
             })
         )
     }
+}
+
+pub unsafe fn find_slot_by_pid(pid: usize) -> Option<usize> {
+    PROCESSES
+        .iter()
+        .enumerate()
+        .find_map(|(slot, process)| match process {
+            Some(p) if p.pid == pid => Some(slot),
+            _ => None,
+        })
 }
