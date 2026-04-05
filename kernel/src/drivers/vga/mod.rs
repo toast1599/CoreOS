@@ -6,9 +6,9 @@ use crate::boot::CoreOS_BootInfo;
 use core::ptr::addr_of;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-pub const BG_COLOR: u32 = 0x00191724; // Base Midnight
-pub const TEXT_COLOR: u32 = 0x00E0DEF4; // Text Lavender
-pub const CLOCK_COLOR: u32 = 0x00EBBCBA; // Rose Pink
+pub const BG_COLOR: u32 = 0xFF1A161F;
+pub const TEXT_COLOR: u32 = 0xFFE6E1CF;
+pub const CLOCK_COLOR: u32 = 0xFFF5C2E7;
 
 // ---------------------------------------------------------------------------
 // Global framebuffer state — set once at boot, used by syscall write()
