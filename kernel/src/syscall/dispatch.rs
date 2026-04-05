@@ -5,7 +5,7 @@ pub unsafe fn route(num: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, frame:
     match num {
         nr::READ => io::read(arg1, arg2, arg3),
         nr::WRITE => io::write(arg1, arg2, arg3),
-        nr::OPEN => vfs::open(arg1, arg2),
+        nr::OPEN => vfs::open(arg1, arg2, arg3),
         nr::CLOSE => process::syscall_close(arg1),
         nr::FSIZE => vfs::fsize(arg1),
         nr::LS => vfs::ls(arg1, arg2),
@@ -16,6 +16,7 @@ pub unsafe fn route(num: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, frame:
         nr::BRK => mm::brk(arg1),
         nr::RT_SIGACTION => process::syscall_rt_sigaction(arg1, arg2, arg3, arg4),
         nr::RT_SIGPROCMASK => process::syscall_rt_sigprocmask(arg1, arg2, arg3, arg4),
+        nr::RT_SIGRETURN => process::syscall_rt_sigreturn(frame),
         nr::IOCTL => io::ioctl(arg1, arg2, arg3),
         nr::PREAD64 => io::pread64(arg1, arg2, arg3, arg4),
         nr::PWRITE64 => io::pwrite64(arg1, arg2, arg3, arg4),
@@ -53,7 +54,8 @@ pub unsafe fn route(num: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, frame:
         nr::SOCKETPAIR => net::syscall_socketpair(arg1 as i32, arg2 as i32, arg3 as i32, arg4),
         nr::SETSOCKOPT => net::syscall_setsockopt(arg1 as i32, arg2 as i32, arg3 as i32, arg4, 0),
         nr::GETSOCKOPT => net::syscall_getsockopt(arg1 as i32, arg2 as i32, arg3 as i32, arg4, 0),
-        nr::EXEC => process::syscall_exec(arg1, arg2),
+        nr::CLONE => process::syscall_clone(arg1, arg2, arg3, arg4, frame),
+        nr::EXEC => process::syscall_exec(arg1, arg2, arg3),
         nr::FORK => process::syscall_fork(frame),
         nr::EXIT => process::syscall_exit(arg1),
         nr::WAITPID => process::syscall_waitpid(arg1),
@@ -63,7 +65,7 @@ pub unsafe fn route(num: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, frame:
         nr::TRUNCATE => vfs::truncate(arg1, arg2),
         nr::FTRUNCATE => vfs::ftruncate(arg1, arg2),
         nr::GETCWD => sys::syscall_getcwd(arg1, arg2),
-        nr::CHDIR => sys::syscall_chdir(arg1, arg2),
+        nr::CHDIR => sys::syscall_chdir(arg1),
         nr::READLINK => vfs::readlink(arg1, arg2, arg3),
         nr::UMASK => process::syscall_umask(arg1),
         nr::GETTIMEOFDAY => time::gettimeofday(arg1, arg2),
@@ -86,15 +88,20 @@ pub unsafe fn route(num: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, frame:
         nr::ARCH_PRCTL => sys::syscall_arch_prctl(arg1, arg2),
         nr::SETRLIMIT => sys::syscall_setrlimit(arg1 as i32, arg2),
         nr::GETTID => process::syscall_gettid(),
+        nr::TKILL => process::syscall_tkill(arg1, arg2),
+        nr::FUTEX => process::syscall_futex(arg1, arg2, arg3, arg4, frame),
         nr::SET_TID_ADDRESS => process::syscall_set_tid_address(arg1),
         nr::CLOCK_GETTIME => time::clock_gettime(arg1, arg2),
         nr::CLOCK_NANOSLEEP => time::clock_nanosleep(arg1, arg2, arg3, arg4),
-        nr::EXIT_GROUP => process::syscall_exit(arg1),
+        nr::EXIT_GROUP => process::syscall_exit_group(arg1),
+        nr::TGKILL => process::syscall_tgkill(arg1, arg2, arg3),
         nr::OPENAT => vfs::openat(arg1, arg2, arg3, arg4),
         nr::FSTATAT => vfs::fstatat(arg1, arg2, arg3, arg4),
         nr::UNLINKAT => vfs::unlinkat(arg1, arg2, arg3, arg4),
         nr::READLINKAT => vfs::readlinkat(arg1, arg2, arg3, arg4),
         nr::FACCESSAT => vfs::faccessat(arg1, arg2, arg3, arg4),
+        nr::SET_ROBUST_LIST => process::syscall_set_robust_list(arg1, arg2),
+        nr::GET_ROBUST_LIST => process::syscall_get_robust_list(arg1, arg2, arg3),
         nr::ACCEPT4 => net::syscall_accept4(arg1 as i32, arg2, arg3, arg4 as i32),
         nr::DUP3 => process::syscall_dup3(arg1, arg2, arg3),
         nr::PIPE2 => process::syscall_pipe2(arg1, arg2),
@@ -109,7 +116,7 @@ pub unsafe fn route(num: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, frame:
                 num,
                 nr::name(num)
             );
-            u64::MAX
+            crate::syscall::result::errno(crate::syscall::result::SysError::NoSys)
         }
     }
 }

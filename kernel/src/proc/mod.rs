@@ -8,6 +8,7 @@ pub mod task;
 mod vm;
 
 use core::sync::atomic::AtomicUsize;
+use crate::syscall::types::{SigAction, SigSet, StackT};
 
 // ---------------------------------------------------------------------------
 // File descriptor table
@@ -21,6 +22,15 @@ pub const MAX_VMAS: usize = 32;
 pub const EXE_PATH_MAX: usize = 64;
 pub const MMAP_BASE: usize = 0x0000_0001_0000_0000;
 pub const FD_CLOEXEC: u32 = 1;
+pub const O_ACCMODE: u32 = 0o3;
+pub const O_RDONLY: u32 = 0o0;
+pub const O_WRONLY: u32 = 0o1;
+pub const O_RDWR: u32 = 0o2;
+pub const O_CREAT: u32 = 0o100;
+pub const O_EXCL: u32 = 0o200;
+pub const O_TRUNC: u32 = 0o1000;
+pub const O_APPEND: u32 = 0o2000;
+pub const O_NONBLOCK: u32 = 0o4000;
 const PIPE_CAPACITY: usize = 1024;
 
 /// A shared open file description pointing into RamFS.
@@ -128,6 +138,32 @@ pub enum ProcessState {
     Zombie,
 }
 
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum ThreadState {
+    Running,
+    Zombie,
+}
+
+#[derive(Clone, Copy)]
+pub struct Thread {
+    pub tid: usize,
+    #[allow(dead_code)]
+    pub parent_tid: usize,
+    pub group_slot: usize,
+    pub task_slot: usize,
+    pub state: ThreadState,
+    pub clear_child_tid: u64,
+    pub fs_base: u64,
+    pub sig_pending: SigSet,
+    pub sig_mask: SigSet,
+    pub saved_sig_mask: SigSet,
+    pub sig_altstack: StackT,
+    pub in_signal_handler: bool,
+    pub on_altstack: bool,
+    pub robust_list_head: u64,
+    pub robust_list_len: usize,
+}
+
 // ---------------------------------------------------------------------------
 // Process descriptor
 // ---------------------------------------------------------------------------
@@ -140,20 +176,21 @@ pub struct Process {
     pub pgid: usize,
     pub sid: usize,
     pub state: ProcessState,
-    pub task_slot: usize,
+    pub leader_slot: usize,
+    pub thread_count: usize,
     pub exit_code: i64,
     pub uid: u32,
     pub euid: u32,
     pub gid: u32,
     pub egid: u32,
     pub umask: u32,
-    pub clear_child_tid: u64,
-    pub fs_base: u64,
     pub exe_path: [u8; EXE_PATH_MAX],
     pub exe_path_len: usize,
     pub program_break: usize,
     pub next_mmap_base: usize,
     pub pml4: usize,
+    pub sig_handlers: [SigAction; 65],
+    pub sig_pending: SigSet,
     /// Per-process file descriptor table. 0/1/2 start as stdin/stdout/stderr.
     pub fds: [FdTarget; MAX_FDS],
     pub fd_flags: [u32; MAX_FDS],
@@ -168,6 +205,7 @@ static NEXT_PID: AtomicUsize = AtomicUsize::new(1);
 
 /// The process table. Indexed by task slot (matching Task array in task.rs).
 pub static mut PROCESSES: [Option<Process>; 8] = [None, None, None, None, None, None, None, None];
+pub static mut THREADS: [Option<Thread>; 8] = [None, None, None, None, None, None, None, None];
 static mut OPEN_FILES: [OpenFile; MAX_OPEN_FILES] = [OpenFile::empty(); MAX_OPEN_FILES];
 static mut PIPES: [Pipe; MAX_PIPES] = [Pipe::empty(); MAX_PIPES];
 
@@ -188,14 +226,16 @@ fn default_fd_flags() -> [u32; MAX_FDS] {
 // ---------------------------------------------------------------------------
 
 pub use fd::{
-    close_descriptor, create_pipe_pair, dup_exact, dup_min, fd_exists, fork_current,
+    close_descriptor, create_pipe_pair, dup_exact, dup_min, fork_current,
     get_fd_flags, get_fd_mut, get_status_flags, is_stdin, is_stdout_or_stderr, open_file, read_file,
-    read_pipe, reap_slot, seek, set_cloexec, set_status_flags, write_pipe,
+    read_pipe, reap_slot, seek, set_cloexec, set_status_flags, write_file, write_pipe,
 };
 pub use fd::{descriptor_info, file_size};
 pub use process::{
-    current_brk, current_pid, current_ppid, current_process, current_process_mut, exit,
+    current_brk, current_pid, current_ppid, current_process, current_process_mut, current_thread,
+    current_thread_mut, current_tid, exit, exit_thread, spawn_thread_in_group,
     find_slot_by_pid, is_running_in_slot, set_brk, spawn_named, active_process_count,
+    task_slot_reaped, find_thread_slot_by_tid,
     current_fs_base, current_exe_path,
 };
 pub use vm::{alloc_vma, find_vma_exact_mut, region_conflicts, reserve_mmap_base};

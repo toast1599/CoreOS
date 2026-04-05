@@ -4,12 +4,13 @@ mod fd_open;
 mod fd_pipe;
 
 use super::{
-    task, DescriptorInfo, FdTarget, OpenFile, Process, MAX_FDS, MAX_OPEN_FILES, MAX_PIPES,
-    OPEN_FILES, PIPES, PROCESSES, FD_CLOEXEC,
+    DescriptorInfo, FdTarget, OpenFile, Process, MAX_FDS, MAX_OPEN_FILES, MAX_PIPES,
+    OPEN_FILES, PIPES, PROCESSES, THREADS, FD_CLOEXEC,
 };
+use crate::syscall::types::{SigSet, StackT};
 
-unsafe fn alloc_open_file(file_idx: usize) -> Option<usize> {
-    fd_open::alloc(file_idx)
+unsafe fn alloc_open_file_with_flags(file_idx: usize, status_flags: u32) -> Option<usize> {
+    fd_open::alloc(file_idx, status_flags)
 }
 
 unsafe fn retain_fd_target(target: FdTarget) -> bool {
@@ -40,6 +41,7 @@ pub unsafe fn release_fds(fds: &[FdTarget; MAX_FDS]) {
 pub unsafe fn fork_current(task_slot: usize, pml4: usize) -> usize {
     let pid = super::NEXT_PID.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
     let parent = super::current_process().expect("fork_current without current process");
+    let parent_thread = super::current_thread().expect("fork_current without current thread");
     let fds = parent.fds;
     for target in fds {
         match target {
@@ -67,23 +69,41 @@ pub unsafe fn fork_current(task_slot: usize, pml4: usize) -> usize {
         pgid: parent.pgid,
         sid: parent.sid,
         state: super::ProcessState::Running,
-        task_slot,
+        leader_slot: task_slot,
+        thread_count: 1,
         exit_code: 0,
         uid: parent.uid,
         euid: parent.euid,
         gid: parent.gid,
         egid: parent.egid,
         umask: parent.umask,
-        clear_child_tid: 0,
-        fs_base: parent.fs_base,
         exe_path: parent.exe_path,
         exe_path_len: parent.exe_path_len,
         program_break: parent.program_break,
         next_mmap_base: parent.next_mmap_base,
         pml4,
+        sig_handlers: parent.sig_handlers,
+        sig_pending: SigSet::empty(),
         fds,
         fd_flags: parent.fd_flags,
         vmas: parent.vmas,
+    });
+    THREADS[task_slot] = Some(super::Thread {
+        tid: pid,
+        parent_tid: parent_thread.tid,
+        group_slot: task_slot,
+        task_slot,
+        state: super::ThreadState::Running,
+        clear_child_tid: 0,
+        fs_base: parent_thread.fs_base,
+        sig_pending: SigSet::empty(),
+        sig_mask: parent_thread.sig_mask,
+        saved_sig_mask: SigSet::empty(),
+        sig_altstack: StackT::disabled(),
+        in_signal_handler: false,
+        on_altstack: false,
+        robust_list_head: 0,
+        robust_list_len: 0,
     });
     crate::dbg_log!("PROCESS", "forked pid={} at slot={}", pid, task_slot);
     pid
@@ -95,6 +115,7 @@ pub unsafe fn reap_slot(slot: usize) -> Option<i64> {
             let code = p.exit_code;
             release_fds(&p.fds);
             PROCESSES[slot] = None;
+            THREADS[slot] = None;
             crate::dbg_log!("PROCESS", "reaped slot={}, exit_code={}", slot, code);
             return Some(code);
         }
@@ -102,16 +123,17 @@ pub unsafe fn reap_slot(slot: usize) -> Option<i64> {
     None
 }
 
-pub unsafe fn alloc_fd(file_idx: usize) -> i64 {
-    let slot = match task::current_task_slot() {
-        Some(s) => s,
-        None => return -1,
-    };
-    let open_idx = match alloc_open_file(file_idx) {
+pub unsafe fn open_file(file_idx: usize, status_flags: u32) -> Option<usize> {
+    let fd = alloc_fd_with_flags(file_idx, status_flags);
+    if fd < 0 { None } else { Some(fd as usize) }
+}
+
+unsafe fn alloc_fd_with_flags(file_idx: usize, status_flags: u32) -> i64 {
+    let open_idx = match alloc_open_file_with_flags(file_idx, status_flags) {
         Some(i) => i,
         None => return -1,
     };
-    let p = match PROCESSES[slot].as_mut() {
+    let p = match super::current_process_mut() {
         Some(p) => p,
         None => return -1,
     };
@@ -126,14 +148,8 @@ pub unsafe fn alloc_fd(file_idx: usize) -> i64 {
     -1
 }
 
-pub unsafe fn open_file(file_idx: usize) -> Option<usize> {
-    let fd = alloc_fd(file_idx);
-    if fd < 0 { None } else { Some(fd as usize) }
-}
-
 pub unsafe fn get_fd_target(fd: usize) -> Option<FdTarget> {
-    let slot = task::current_task_slot()?;
-    let p = PROCESSES[slot].as_ref()?;
+    let p = super::current_process()?;
     if fd >= MAX_FDS {
         return None;
     }
@@ -160,11 +176,7 @@ pub unsafe fn get_fd_mut(fd: usize) -> Option<&'static mut OpenFile> {
 }
 
 pub unsafe fn close_fd(fd: usize) -> bool {
-    let slot = match task::current_task_slot() {
-        Some(s) => s,
-        None => return false,
-    };
-    let p = match PROCESSES[slot].as_mut() {
+    let p = match super::current_process_mut() {
         Some(p) => p,
         None => return false,
     };
@@ -186,11 +198,7 @@ pub unsafe fn close_descriptor(fd: usize) -> bool {
 }
 
 pub unsafe fn dup_fd(old_fd: usize, min_fd: usize, new_fd: Option<usize>, cloexec: bool) -> i64 {
-    let slot = match task::current_task_slot() {
-        Some(s) => s,
-        None => return -1,
-    };
-    let p = match PROCESSES[slot].as_mut() {
+    let p = match super::current_process_mut() {
         Some(p) => p,
         None => return -1,
     };
@@ -248,13 +256,8 @@ pub unsafe fn dup_exact(old_fd: usize, new_fd: usize, cloexec: bool) -> Option<u
     if fd < 0 { None } else { Some(fd as usize) }
 }
 
-pub unsafe fn fd_exists(fd: usize) -> bool {
-    get_fd_target(fd).is_some()
-}
-
 pub unsafe fn get_fd_flags(fd: usize) -> Option<u32> {
-    let slot = task::current_task_slot()?;
-    let p = PROCESSES[slot].as_ref()?;
+    let p = super::current_process()?;
     if fd >= MAX_FDS || matches!(p.fds[fd], FdTarget::Empty) {
         return None;
     }
@@ -262,11 +265,7 @@ pub unsafe fn get_fd_flags(fd: usize) -> Option<u32> {
 }
 
 pub unsafe fn set_fd_flags(fd: usize, flags: u32) -> bool {
-    let slot = match task::current_task_slot() {
-        Some(s) => s,
-        None => return false,
-    };
-    let p = match PROCESSES[slot].as_mut() {
+    let p = match super::current_process_mut() {
         Some(p) => p,
         None => return false,
     };
@@ -345,9 +344,34 @@ pub unsafe fn set_status_flags(fd: usize, flags: u32) -> bool {
 
 pub unsafe fn read_file(fd: usize, buf: *mut u8, count: usize) -> Option<usize> {
     let of = get_fd_mut(fd)?;
+    if (of.status_flags & super::O_ACCMODE) == super::O_WRONLY {
+        return None;
+    }
     let bytes_read = crate::syscall::fs::fs_read(of.file_idx, of.offset, buf, count);
     of.offset += bytes_read;
     Some(bytes_read)
+}
+
+pub unsafe fn write_file(fd: usize, buf: *const u8, len: usize) -> Option<usize> {
+    let of = get_fd_mut(fd)?;
+    match of.status_flags & super::O_ACCMODE {
+        super::O_RDONLY => return None,
+        super::O_WRONLY | super::O_RDWR => {}
+        _ => return None,
+    }
+
+    let offset = if (of.status_flags & super::O_APPEND) != 0 {
+        crate::syscall::fs::fs_file_size(of.file_idx)
+    } else {
+        of.offset
+    };
+
+    let bytes = core::slice::from_raw_parts(buf, len);
+    if !crate::syscall::fs::fs_write_at(of.file_idx, offset, bytes) {
+        return None;
+    }
+    of.offset = offset + len;
+    Some(len)
 }
 
 pub unsafe fn write_pipe(fd: usize, buf: *const u8, len: usize) -> Option<usize> {
@@ -359,11 +383,7 @@ pub unsafe fn read_pipe(fd: usize, buf: *mut u8, count: usize) -> Option<usize> 
 }
 
 unsafe fn alloc_specific_fd(target: FdTarget, fd_flags: u32) -> i64 {
-    let slot = match task::current_task_slot() {
-        Some(s) => s,
-        None => return -1,
-    };
-    let p = match PROCESSES[slot].as_mut() {
+    let p = match super::current_process_mut() {
         Some(p) => p,
         None => return -1,
     };

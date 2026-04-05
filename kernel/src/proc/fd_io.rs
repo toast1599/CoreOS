@@ -34,6 +34,9 @@ pub unsafe fn write_to_fd(fd: usize, buf: *const u8, len: usize) -> Option<usize
     if proc::is_stdout_or_stderr(fd) {
         return Some(write_stdio(buf, len));
     }
+    if let Some(written) = proc::write_file(fd, buf, len) {
+        return Some(written);
+    }
     proc::write_pipe(fd, buf, len)
 }
 

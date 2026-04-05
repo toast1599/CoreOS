@@ -87,7 +87,6 @@ static RNG_STATE: AtomicU64 = AtomicU64::new(0);
 /// getrlimit(resource, rlim) - Get resource limits
 fn syscall_getrlimit_impl(resource: i32, rlim: u64) -> SysResult {
     result::ensure(rlim != 0, SysError::Fault)?;
-    // For now, return unlimited for everything
     let limit = match resource {
         RLIMIT_NOFILE => RLimit {
             rlim_cur: 1024,
@@ -105,10 +104,7 @@ fn syscall_getrlimit_impl(resource: i32, rlim: u64) -> SysResult {
             rlim_cur: 0,
             rlim_max: RLIM_INFINITY,
         },
-        _ => RLimit {
-            rlim_cur: RLIM_INFINITY,
-            rlim_max: RLIM_INFINITY,
-        },
+        _ => return result::err(SysError::Invalid),
     };
     result::ensure(unsafe { helpers::copy_struct_to_user(rlim, &limit) }, SysError::Fault)?;
     result::ok(0u64)
@@ -151,7 +147,8 @@ pub fn syscall_getcwd(buf: u64, size: u64) -> u64 {
 }
 
 fn syscall_getcwd_impl(buf: u64, size: u64) -> SysResult {
-    result::ensure(buf != 0 && size >= ROOT_DIR.len() as u64, SysError::Fault)?;
+    result::ensure(buf != 0, SysError::Fault)?;
+    result::ensure(size >= ROOT_DIR.len() as u64, SysError::Range)?;
     result::ensure(
         unsafe { crate::usercopy::copy_to_user(buf, ROOT_DIR) }.is_ok(),
         SysError::Fault,
@@ -159,23 +156,18 @@ fn syscall_getcwd_impl(buf: u64, size: u64) -> SysResult {
     result::ok(buf)
 }
 
-pub fn syscall_chdir(path_ptr: u64, path_len: u64) -> u64 {
-    result::ret(syscall_chdir_impl(path_ptr, path_len))
+pub fn syscall_chdir(path_ptr: u64) -> u64 {
+    result::ret(syscall_chdir_impl(path_ptr))
 }
 
-fn syscall_chdir_impl(path_ptr: u64, path_len: u64) -> SysResult {
-    if path_len == 1 {
-        let mut raw = [0u8; 1];
-        result::ensure(
-            unsafe { crate::usercopy::copy_from_user(&mut raw, path_ptr) }.is_ok(),
-            SysError::Fault,
-        )?;
-        result::ensure(matches!(raw[0], b'/' | b'.'), SysError::NoEntry)?;
+fn syscall_chdir_impl(path_ptr: u64) -> SysResult {
+    let (raw, raw_len) = result::option(unsafe { helpers::copy_cstr_from_user(path_ptr) }, SysError::Fault)?;
+    if raw_len == 1 && raw[0] == b'/' {
         return result::ok(0u64);
     }
 
     let (name_buf, name_len) = result::option(
-        unsafe { helpers::copy_path_from_user(path_ptr, path_len) },
+        unsafe { helpers::copy_path_cstr_from_user(path_ptr) },
         SysError::Fault,
     )?;
     result::ensure(name_len == 1 && name_buf[0] == '.', SysError::NoEntry)?;
@@ -187,16 +179,27 @@ pub fn syscall_sigaltstack(ss_ptr: u64, old_ss_ptr: u64) -> u64 {
 }
 
 fn syscall_sigaltstack_impl(_ss_ptr: u64, old_ss_ptr: u64) -> SysResult {
+    let thread = result::option(unsafe { crate::proc::current_thread_mut() }, SysError::Invalid)?;
     if old_ss_ptr != 0 {
-        let disabled = StackT {
-            ss_sp: 0,
-            ss_flags: 2,
-            ss_size: 0,
-        };
+        let mut current = thread.sig_altstack;
+        if thread.on_altstack {
+            current.ss_flags |= 1;
+        }
         result::ensure(
-            unsafe { helpers::copy_struct_to_user(old_ss_ptr, &disabled) },
+            unsafe { helpers::copy_struct_to_user(old_ss_ptr, &current) },
             SysError::Fault,
         )?;
+    }
+    if _ss_ptr != 0 {
+        let mut new_stack: StackT =
+            result::option(unsafe { helpers::copy_struct_from_user(_ss_ptr) }, SysError::Fault)?;
+        if (new_stack.ss_flags & 2) != 0 {
+            new_stack = StackT::disabled();
+        } else {
+            result::ensure(new_stack.ss_sp != 0 && new_stack.ss_size != 0, SysError::Invalid)?;
+            new_stack.ss_flags = 0;
+        }
+        thread.sig_altstack = new_stack;
     }
     result::ok(0u64)
 }
@@ -236,8 +239,8 @@ fn syscall_arch_prctl_impl(code: u64, addr: u64) -> SysResult {
     match code {
         ARCH_SET_FS => {
             result::ensure(addr < USER_TOP, SysError::Invalid)?;
-            let process = result::option(unsafe { crate::proc::current_process_mut() }, SysError::Invalid)?;
-            process.fs_base = addr;
+            let thread = result::option(unsafe { crate::proc::current_thread_mut() }, SysError::Invalid)?;
+            thread.fs_base = addr;
             unsafe { crate::arch::amd64::cpu::write_fs_base(addr) };
             result::ok(0u64)
         }
@@ -247,7 +250,7 @@ fn syscall_arch_prctl_impl(code: u64, addr: u64) -> SysResult {
             result::ensure(unsafe { helpers::copy_struct_to_user(addr, &fs_base) }, SysError::Fault)?;
             result::ok(0u64)
         }
-        _ => result::err(SysError::Unsupported),
+        _ => result::err(SysError::Invalid),
     }
 }
 

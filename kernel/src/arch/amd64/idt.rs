@@ -143,20 +143,61 @@ keyboard_interrupt:
     pop rax
     iretq
 // --- Exceptions -------------------------------------------------------
-.global exc0_stub
-.global exc6_stub
-.global exc13_stub
-.global exc14_stub
 .extern default_exception
 
-exc0_stub:  push 0; push 0; push 0;  jmp exc_common
-exc6_stub:  push 0; push 0; push 6;  jmp exc_common
-exc13_stub: push 0;         push 13; jmp exc_common
-exc14_stub: push 0;         push 14; jmp exc_common
+.macro EXC_NOERR num
+.global exc\num\()_stub
+exc\num\()_stub:
+    push 0
+    push \num
+    push 0
+    jmp exc_common
+.endm
+
+.macro EXC_ERR num
+.global exc\num\()_stub
+exc\num\()_stub:
+    push \num
+    push 0
+    jmp exc_common
+.endm
+
+EXC_NOERR 0
+EXC_NOERR 1
+EXC_NOERR 2
+EXC_NOERR 3
+EXC_NOERR 4
+EXC_NOERR 5
+EXC_NOERR 6
+EXC_NOERR 7
+EXC_ERR   8
+EXC_NOERR 9
+EXC_ERR   10
+EXC_ERR   11
+EXC_ERR   12
+EXC_ERR   13
+EXC_ERR   14
+EXC_NOERR 15
+EXC_NOERR 16
+EXC_ERR   17
+EXC_NOERR 18
+EXC_NOERR 19
+EXC_NOERR 20
+EXC_ERR   21
+EXC_NOERR 22
+EXC_NOERR 23
+EXC_NOERR 24
+EXC_NOERR 25
+EXC_NOERR 26
+EXC_NOERR 27
+EXC_NOERR 28
+EXC_NOERR 29
+EXC_ERR   30
+EXC_NOERR 31
 
 exc_common:
     cli
-    // Current stack: [vector], [error_code], [padding], [rip], [cs], [rflags], [rsp], [ss]
+    // Current stack: [padding], [vector], [error_code], [rip], [cs], [rflags], [rsp], [ss]
     // Save all general purpose registers
     push rax
     push rbx
@@ -208,25 +249,57 @@ extern "C" {
     fn keyboard_interrupt();
     fn pit_interrupt();
     fn exc0_stub();
+    fn exc1_stub();
+    fn exc2_stub();
+    fn exc3_stub();
+    fn exc4_stub();
+    fn exc5_stub();
     fn exc6_stub();
+    fn exc7_stub();
+    fn exc8_stub();
+    fn exc9_stub();
+    fn exc10_stub();
+    fn exc11_stub();
+    fn exc12_stub();
     fn exc13_stub();
     fn exc14_stub();
+    fn exc15_stub();
+    fn exc16_stub();
+    fn exc17_stub();
+    fn exc18_stub();
+    fn exc19_stub();
+    fn exc20_stub();
+    fn exc21_stub();
+    fn exc22_stub();
+    fn exc23_stub();
+    fn exc24_stub();
+    fn exc25_stub();
+    fn exc26_stub();
+    fn exc27_stub();
+    fn exc28_stub();
+    fn exc29_stub();
+    fn exc30_stub();
+    fn exc31_stub();
 }
+
+static EXCEPTION_STUBS: [unsafe extern "C" fn(); 32] = [
+    exc0_stub, exc1_stub, exc2_stub, exc3_stub, exc4_stub, exc5_stub, exc6_stub, exc7_stub,
+    exc8_stub, exc9_stub, exc10_stub, exc11_stub, exc12_stub, exc13_stub, exc14_stub, exc15_stub,
+    exc16_stub, exc17_stub, exc18_stub, exc19_stub, exc20_stub, exc21_stub, exc22_stub,
+    exc23_stub, exc24_stub, exc25_stub, exc26_stub, exc27_stub, exc28_stub, exc29_stub,
+    exc30_stub, exc31_stub,
+];
 
 // ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
 
 pub unsafe fn init() {
-    // Vectors 0–31 are reserved for exceptions.
-    // We install specific stubs for the ones we care about,
-    // and let others fall through to a generic halt if triggered.
-    IDT[0].set_handler(exc0_stub);   // Divide by Zero
-    IDT[6].set_handler(exc6_stub);   // Invalid Opcode
-    IDT[13].set_handler(exc13_stub); // GPF
-    IDT[14].set_handler(exc14_stub); // Page Fault
+    for (vector, handler) in EXCEPTION_STUBS.iter().copied().enumerate() {
+        IDT[vector].set_handler(handler);
+    }
 
-    // Hardware IRQs (after PIC remapping: IRQ0 → 32, IRQ1 → 33)
+    // Hardware IRQs (after PIC remapping: IRQ0 -> 32, IRQ1 -> 33)
     IDT[32].set_handler(pit_interrupt);
     IDT[33].set_handler(keyboard_interrupt);
 
@@ -241,4 +314,3 @@ pub unsafe fn init() {
     // Remap PIC and set IRQ masks
     crate::hw::pic::init();
 }
-

@@ -178,7 +178,8 @@ static void cmd_touch(const char *arg) {
     puts("usage: touch <name>\n");
     return;
   }
-  if (sys_touch(arg, str_len(arg)) == 0)
+  int fd = open(arg, O_CREAT | O_EXCL | O_RDONLY, 0644);
+  if (fd >= 0 && sys_close(fd) == 0)
     puts("ok\n");
   else
     puts("error: could not create file\n");
@@ -189,7 +190,7 @@ static void cmd_rm(const char *arg) {
     puts("usage: rm <name>\n");
     return;
   }
-  if (sys_rm(arg, str_len(arg)) == 0)
+  if (unlinkat(AT_FDCWD, arg, 0) == 0)
     puts("ok\n");
   else
     puts("error: file not found\n");
@@ -208,7 +209,9 @@ static void cmd_write(const char *arg) {
     puts("usage: write <name> <content>\n");
     return;
   }
-  if (sys_write_file(name, str_len(name), arg, str_len(arg)) == 0)
+  int fd = open(name, O_CREAT | O_TRUNC | O_WRONLY, 0644);
+  if (fd >= 0 && write(fd, arg, str_len(arg)) == (ssize_t)str_len(arg) &&
+      sys_close(fd) == 0)
     puts("ok\n");
   else
     puts("error\n");
@@ -227,7 +230,9 @@ static void cmd_push(const char *arg) {
     puts("usage: push <name> <content>\n");
     return;
   }
-  if (sys_push_file(name, str_len(name), arg, str_len(arg)) == 0)
+  int fd = open(name, O_CREAT | O_APPEND | O_WRONLY, 0644);
+  if (fd >= 0 && write(fd, arg, str_len(arg)) == (ssize_t)str_len(arg) &&
+      sys_close(fd) == 0)
     puts("ok\n");
   else
     puts("error\n");
@@ -239,7 +244,7 @@ static void cmd_cat(const char *filename) {
     println("usage: cat <file>");
     return;
   }
-  int fd = sys_open(filename, str_len(filename));
+  int fd = sys_open(filename, O_RDONLY, 0);
   if (fd == -1 || (long)fd == -1L) {
     print("cat: file not found: ");
     println(filename);
@@ -276,7 +281,7 @@ static void cmd_exec(const char *filename) {
   print("exec: spawning ");
   println(filename);
 
-  long pid = sys_exec(filename, str_len(filename));
+  long pid = sys_exec(filename);
   if (pid == 0) {
     println("exec: failed to spawn process");
     return;

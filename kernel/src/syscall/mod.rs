@@ -152,5 +152,8 @@ pub extern "C" fn syscall_dispatch(
     arg4: u64,
     frame: u64,
 ) -> u64 {
-    unsafe { dispatch::route(num, arg1, arg2, arg3, arg4, frame) }
+    unsafe {
+        let ret = dispatch::route(num, arg1, arg2, arg3, arg4, frame);
+        process::finish_syscall(num, frame, ret)
+    }
 }

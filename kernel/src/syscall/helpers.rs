@@ -5,25 +5,22 @@ use crate::syscall::types::Iovec;
 pub const MAX_PATH_LEN: usize = 64;
 pub const MAX_IOV: usize = 16;
 
-pub unsafe fn copy_path_from_user(path_ptr: u64, path_len: u64) -> Option<([char; MAX_PATH_LEN], usize)> {
-    if path_len == 0 || path_len as usize > MAX_PATH_LEN {
+fn normalize_path_bytes(raw: &[u8]) -> Option<([char; MAX_PATH_LEN], usize)> {
+    if raw.is_empty() || raw.len() > MAX_PATH_LEN {
         return None;
     }
 
-    let mut raw = [0u8; MAX_PATH_LEN];
-    crate::usercopy::copy_from_user(&mut raw[..path_len as usize], path_ptr).ok()?;
-
     let mut start = 0usize;
-    while start < path_len as usize && raw[start] == b'/' {
+    while start < raw.len() && raw[start] == b'/' {
         start += 1;
     }
-    if start >= path_len as usize {
+    if start >= raw.len() {
         return None;
     }
 
     let mut name_buf = ['\0'; MAX_PATH_LEN];
     let mut out_len = 0usize;
-    for &b in &raw[start..path_len as usize] {
+    for &b in &raw[start..] {
         if b == b'/' || out_len >= name_buf.len() {
             return None;
         }
@@ -36,6 +33,16 @@ pub unsafe fn copy_path_from_user(path_ptr: u64, path_len: u64) -> Option<([char
     } else {
         Some((name_buf, out_len))
     }
+}
+
+pub unsafe fn copy_path_from_user(path_ptr: u64, path_len: u64) -> Option<([char; MAX_PATH_LEN], usize)> {
+    if path_len == 0 || path_len as usize > MAX_PATH_LEN {
+        return None;
+    }
+
+    let mut raw = [0u8; MAX_PATH_LEN];
+    crate::usercopy::copy_from_user(&mut raw[..path_len as usize], path_ptr).ok()?;
+    normalize_path_bytes(&raw[..path_len as usize])
 }
 
 pub unsafe fn copy_cstr_from_user(path_ptr: u64) -> Option<([u8; MAX_PATH_LEN], usize)> {
@@ -53,6 +60,11 @@ pub unsafe fn copy_cstr_from_user(path_ptr: u64) -> Option<([u8; MAX_PATH_LEN], 
         }
     }
     None
+}
+
+pub unsafe fn copy_path_cstr_from_user(path_ptr: u64) -> Option<([char; MAX_PATH_LEN], usize)> {
+    let (raw, len) = copy_cstr_from_user(path_ptr)?;
+    normalize_path_bytes(&raw[..len])
 }
 
 pub unsafe fn copy_struct_from_user<T: Copy>(user_ptr: u64) -> Option<T> {

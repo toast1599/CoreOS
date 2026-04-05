@@ -1,12 +1,12 @@
 use super::super::{DescriptorInfo, OpenFile, MAX_OPEN_FILES};
 
-pub(super) unsafe fn alloc(file_idx: usize) -> Option<usize> {
+pub(super) unsafe fn alloc(file_idx: usize, status_flags: u32) -> Option<usize> {
     for (i, of) in super::OPEN_FILES.iter_mut().enumerate() {
         if !of.in_use {
             *of = OpenFile {
                 file_idx,
                 offset: 0,
-                status_flags: 0,
+                status_flags,
                 refs: 1,
                 in_use: true,
             };

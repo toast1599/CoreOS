@@ -6,13 +6,16 @@
 typedef long ssize_t;
 typedef long off_t;
 typedef long time_t;
-typedef unsigned long sigset_t;
+typedef struct {
+  unsigned long bits[16];
+} sigset_t;
 
 #define PROT_NONE 0
 #define PROT_EXEC 1
 #define PROT_WRITE 2
 #define PROT_READ 4
 
+#define MAP_SHARED 0x01
 #define MAP_PRIVATE 0x02
 #define MAP_FIXED 0x10
 #define MAP_ANONYMOUS 0x20
@@ -28,9 +31,14 @@ typedef unsigned long sigset_t;
 #define W_OK 2
 #define R_OK 4
 #define O_CLOEXEC 02000000
+#define O_CREAT 0100
+#define O_EXCL 0200
+#define O_TRUNC 01000
 #define O_APPEND 02000
 #define O_NONBLOCK 04000
 #define O_RDONLY 0
+#define O_WRONLY 1
+#define O_RDWR 2
 #define TCGETS 0x5401
 #define TIOCGWINSZ 0x5413
 #define FD_CLOEXEC 1
@@ -44,6 +52,29 @@ typedef unsigned long sigset_t;
 #define ARCH_GET_FS 0x1003
 #define GRND_NONBLOCK 0x0001
 #define GRND_RANDOM 0x0002
+#define SIG_BLOCK 0
+#define SIG_UNBLOCK 1
+#define SIG_SETMASK 2
+#define SIGUSR1 10
+#define SIGSEGV 11
+#define SIGTERM 15
+#define SIGCHLD 17
+#define SA_ONSTACK 0x08000000UL
+#define SA_RESTORER 0x04000000UL
+#define SS_ONSTACK 1
+#define SS_DISABLE 2
+#define FUTEX_WAIT 0
+#define FUTEX_WAKE 1
+#define FUTEX_OWNER_DIED 0x40000000
+#define CLONE_VM 0x00000100UL
+#define CLONE_FS 0x00000200UL
+#define CLONE_FILES 0x00000400UL
+#define CLONE_SIGHAND 0x00000800UL
+#define CLONE_SETTLS 0x00080000UL
+#define CLONE_PARENT_SETTID 0x00100000UL
+#define CLONE_CHILD_CLEARTID 0x00200000UL
+#define CLONE_CHILD_SETTID 0x01000000UL
+#define CLONE_THREAD 0x00010000UL
 
 struct timespec {
   time_t tv_sec;
@@ -105,6 +136,23 @@ typedef struct {
   size_t ss_size;
 } stack_t;
 
+struct sigaction {
+  void (*sa_handler)(int);
+  unsigned long sa_flags;
+  void (*sa_restorer)(void);
+  sigset_t sa_mask;
+};
+
+struct robust_list {
+  struct robust_list *next;
+};
+
+struct robust_list_head {
+  struct robust_list list;
+  long futex_offset;
+  struct robust_list *list_op_pending;
+};
+
 struct sysinfo {
   long uptime;
   unsigned long loads[3];
@@ -153,6 +201,8 @@ int ftruncate(int fd, off_t length);
 int getrlimit(int resource, struct rlimit *rlim);
 int gettimeofday(struct timeval *tv, void *tz);
 int sigaltstack(const stack_t *ss, stack_t *old_ss);
+int sigaction(int sig, const struct sigaction *act, struct sigaction *oldact);
+int sigprocmask(int how, const sigset_t *set, sigset_t *oldset);
 unsigned int umask(unsigned int mask);
 ssize_t pread(int fd, void *buf, size_t count, off_t offset);
 ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset);
@@ -170,12 +220,15 @@ int dup(int fd);
 int dup2(int oldfd, int newfd);
 int dup3(int oldfd, int newfd, int flags);
 int fork(void);
+int open(const char *path, int flags, ...);
 int openat(int dirfd, const char *path, int flags, ...);
 int unlinkat(int dirfd, const char *path, int flags);
 ssize_t readlink(const char *path, char *buf, size_t bufsiz);
 ssize_t readlinkat(int dirfd, const char *path, char *buf, size_t bufsiz);
 long getrandom(void *buf, size_t len, unsigned int flags);
 int arch_prctl(int code, unsigned long addr);
+int tkill(int tid, int sig);
+int tgkill(int tgid, int tid, int sig);
 int ioctl(int fd, unsigned long req, ...);
 int fcntl(int fd, int cmd, ...);
 int pipe(int pipefd[2]);
@@ -200,13 +253,26 @@ void free(void *ptr);
 // Raw syscall wrappers
 // ---------------------------------------------------------------------------
 
+static inline long syscall_ret(long ret) {
+  return (ret < 0 && ret >= -4095) ? -1 : ret;
+}
+
+static inline long syscall0(long num) {
+  long ret;
+  __asm__ volatile("syscall"
+                   : "=a"(ret)
+                   : "0"(num)
+                   : "rcx", "r11", "memory");
+  return syscall_ret(ret);
+}
+
 static inline long syscall1(long num, long a1) {
   long ret;
   __asm__ volatile("syscall"
                    : "=a"(ret)
                    : "0"(num), "D"(a1)
                    : "rcx", "r11", "memory");
-  return ret;
+  return syscall_ret(ret);
 }
 
 static inline long syscall3(long num, long a1, long a2, long a3) {
@@ -215,7 +281,7 @@ static inline long syscall3(long num, long a1, long a2, long a3) {
                    : "=a"(ret)
                    : "0"(num), "D"(a1), "S"(a2), "d"(a3)
                    : "rcx", "r11", "memory");
-  return ret;
+  return syscall_ret(ret);
 }
 
 static inline long syscall2(long num, long a1, long a2) {
@@ -228,7 +294,29 @@ static inline long syscall4(long num, long a1, long a2, long a3, long a4) {
                    : "=a"(ret)
                    : "0"(num), "D"(a1), "S"(a2), "d"(a3), "r"(a4)
                    : "rcx", "r10", "r11", "memory");
-  return ret;
+  return syscall_ret(ret);
+}
+
+static inline long syscall5(long num, long a1, long a2, long a3, long a4, long a5) {
+  long ret;
+  __asm__ volatile("mov %5, %%r10; mov %6, %%r8; syscall"
+                   : "=a"(ret)
+                   : "0"(num), "D"(a1), "S"(a2), "d"(a3), "r"(a4), "r"(a5)
+                   : "rcx", "r8", "r10", "r11", "memory");
+  return syscall_ret(ret);
+}
+
+static inline void sigemptyset(sigset_t *set) {
+  for (int i = 0; i < 16; i++) {
+    set->bits[i] = 0;
+  }
+}
+
+static inline void sigaddset(sigset_t *set, int sig) {
+  if (sig <= 0 || sig > 1024) {
+    return;
+  }
+  set->bits[(sig - 1) / 64] |= 1UL << ((sig - 1) % 64);
 }
 
 // ---------------------------------------------------------------------------
@@ -245,9 +333,9 @@ static inline long sys_write(int fd, const void *buf, size_t count) {
   return syscall3(COREOS_SYS_WRITE, fd, (long)buf, (long)count);
 }
 
-// open(path, path_len) — returns fd >= 3 or -1
-static inline int sys_open(const char *path, size_t path_len) {
-  return (int)syscall2(COREOS_SYS_OPEN, (long)path, (long)path_len);
+// open(path, flags, mode)
+static inline int sys_open(const char *path, int flags, int mode) {
+  return (int)syscall3(COREOS_SYS_OPEN, (long)path, flags, mode);
 }
 
 // close(fd)
@@ -344,9 +432,9 @@ static inline int sys_pipe2(int pipefd[2], int flags) {
   return (int)syscall2(COREOS_SYS_PIPE2, (long)pipefd, flags);
 }
 
-// exec(path, path_len) — spawn RamFS ELF, returns pid or 0
-static inline long sys_exec(const char *path, size_t path_len) {
-  return syscall2(COREOS_SYS_EXEC, (long)path, (long)path_len);
+// execve(path, argv, envp) — spawn RamFS ELF, returns pid or 0
+static inline long sys_exec(const char *path) {
+  return syscall3(COREOS_SYS_EXEC, (long)path, 0, 0);
 }
 
 static inline long sys_getpid(void) { return syscall1(COREOS_SYS_GETPID, 0); }
@@ -383,14 +471,17 @@ static inline int sys_rt_sigprocmask(int how, const void *set, void *oldset,
   return (int)syscall4(COREOS_SYS_RT_SIGPROCMASK, how, (long)set, (long)oldset,
                        (long)sigsetsize);
 }
+static inline int sys_rt_sigreturn(void) {
+  return (int)syscall0(COREOS_SYS_RT_SIGRETURN);
+}
 static inline char *sys_getcwd(char *buf, size_t size) {
   return (char *)syscall2(COREOS_SYS_GETCWD, (long)buf, (long)size);
 }
-static inline int sys_chdir(const char *path, size_t path_len) {
-  return (int)syscall2(COREOS_SYS_CHDIR, (long)path, (long)path_len);
+static inline int sys_chdir(const char *path) {
+  return (int)syscall1(COREOS_SYS_CHDIR, (long)path);
 }
-static inline int sys_truncate(const char *path, size_t path_len) {
-  return (int)syscall2(COREOS_SYS_TRUNCATE, (long)path, (long)path_len);
+static inline int sys_truncate(const char *path, off_t len) {
+  return (int)syscall2(COREOS_SYS_TRUNCATE, (long)path, (long)len);
 }
 static inline int sys_ftruncate(int fd, off_t len) {
   return (int)syscall2(COREOS_SYS_FTRUNCATE, fd, (long)len);
@@ -407,8 +498,8 @@ static inline int sys_sigaltstack(const stack_t *ss, stack_t *old_ss) {
 static inline unsigned int sys_umask(unsigned int mask) {
   return (unsigned int)syscall1(COREOS_SYS_UMASK, mask);
 }
-static inline int sys_faccessat(int dirfd, const char *path, size_t path_len, int mode) {
-  return (int)syscall4(COREOS_SYS_FACCESSAT, dirfd, (long)path, (long)path_len, mode);
+static inline int sys_faccessat(int dirfd, const char *path, int mode, int flags) {
+  return (int)syscall4(COREOS_SYS_FACCESSAT, dirfd, (long)path, mode, flags);
 }
 static inline int sys_sysinfo(struct sysinfo *info) {
   return (int)syscall1(COREOS_SYS_SYSINFO, (long)info);
@@ -443,19 +534,38 @@ static inline int sys_clock_nanosleep(int clockid, int flags,
                        (long)rem);
 }
 static inline int sys_fork(void) { return (int)syscall1(COREOS_SYS_FORK, 0); }
+static inline int sys_clone(unsigned long flags, void *child_stack, int *parent_tid,
+                            int *child_tid, unsigned long tls) {
+  return (int)syscall5(COREOS_SYS_CLONE, (long)flags, (long)child_stack,
+                       (long)parent_tid, (long)child_tid, (long)tls);
+}
+static inline int sys_futex(unsigned int *uaddr, int op, unsigned int val,
+                            const struct timespec *timeout) {
+  return (int)syscall4(COREOS_SYS_FUTEX, (long)uaddr, op, val, (long)timeout);
+}
+static inline int sys_tkill(int tid, int sig) {
+  return (int)syscall2(COREOS_SYS_TKILL, tid, sig);
+}
+static inline int sys_tgkill(int tgid, int tid, int sig) {
+  return (int)syscall3(COREOS_SYS_TGKILL, tgid, tid, sig);
+}
+static inline int sys_set_robust_list(struct robust_list_head *head, size_t len) {
+  return (int)syscall2(COREOS_SYS_SET_ROBUST_LIST, (long)head, (long)len);
+}
+static inline int sys_get_robust_list(int tid, struct robust_list_head **head, size_t *len) {
+  return (int)syscall3(COREOS_SYS_GET_ROBUST_LIST, tid, (long)head, (long)len);
+}
 static inline int sys_dup3(int oldfd, int newfd, int flags) {
   return (int)syscall3(COREOS_SYS_DUP3, oldfd, newfd, flags);
 }
 static inline ssize_t sys_writev(int fd, const struct iovec *iov, int iovcnt) {
   return syscall3(COREOS_SYS_WRITEV, fd, (long)iov, iovcnt);
 }
-static inline int sys_openat(int dirfd, const char *path, size_t path_len,
-                             int flags) {
-  return (int)syscall4(COREOS_SYS_OPENAT, dirfd, (long)path, (long)path_len, flags);
+static inline int sys_openat(int dirfd, const char *path, int flags, int mode) {
+  return (int)syscall4(COREOS_SYS_OPENAT, dirfd, (long)path, flags, mode);
 }
-static inline int sys_unlinkat(int dirfd, const char *path, size_t path_len,
-                               int flags) {
-  return (int)syscall4(COREOS_SYS_UNLINKAT, dirfd, (long)path, (long)path_len, flags);
+static inline int sys_unlinkat(int dirfd, const char *path, int flags) {
+  return (int)syscall4(COREOS_SYS_UNLINKAT, dirfd, (long)path, flags, 0);
 }
 static inline ssize_t sys_readlink(const char *path, char *buf, size_t bufsiz) {
   return syscall3(COREOS_SYS_READLINK, (long)path, (long)buf, (long)bufsiz);
@@ -464,9 +574,9 @@ static inline ssize_t sys_readlinkat(int dirfd, const char *path, char *buf,
                                      size_t bufsiz) {
   return syscall4(COREOS_SYS_READLINKAT, dirfd, (long)path, (long)buf, (long)bufsiz);
 }
-static inline int sys_fstatat(int dirfd, const char *path, size_t path_len,
-                              struct stat *st) {
-  return (int)syscall4(COREOS_SYS_FSTATAT, dirfd, (long)path, (long)path_len, (long)st);
+static inline int sys_fstatat(int dirfd, const char *path, struct stat *st,
+                              int flags) {
+  return (int)syscall4(COREOS_SYS_FSTATAT, dirfd, (long)path, (long)st, flags);
 }
 static inline long sys_getrandom(void *buf, size_t len, unsigned int flags) {
   return syscall3(COREOS_SYS_GETRANDOM, (long)buf, (long)len, flags);

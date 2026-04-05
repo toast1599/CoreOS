@@ -78,7 +78,7 @@ pub unsafe fn gettimeofday(tv_ptr: u64, tz_ptr: u64) -> u64 {
 }
 
 unsafe fn gettimeofday_impl(tv_ptr: u64, tz_ptr: u64) -> SysResult {
-    result::ensure(tz_ptr == 0, SysError::Unsupported)?;
+    let _ = tz_ptr;
     let ticks = crate::hw::pit::ticks();
     let tv = Timeval {
         tv_sec: (ticks / PIT_HZ) as i64,
@@ -102,7 +102,7 @@ unsafe fn clock_nanosleep_impl(clockid: u64, flags: u64, req_ptr: u64, rem_ptr: 
         return nanosleep_impl(req_ptr, rem_ptr);
     }
 
-    result::ensure(flags == TIMER_ABSTIME, SysError::Unsupported)?;
+    result::ensure(flags == TIMER_ABSTIME, SysError::Invalid)?;
     let req: Timespec = result::option(helpers::copy_struct_from_user(req_ptr), SysError::Fault)?;
     result::ensure(
         req.tv_sec >= 0 && req.tv_nsec >= 0 && req.tv_nsec < NANOS_PER_SEC as i64,

@@ -51,6 +51,12 @@ pub struct SigSet {
     pub bits: [u64; 16],
 }
 
+impl SigSet {
+    pub const fn empty() -> Self {
+        Self { bits: [0; 16] }
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct SigAction {
@@ -60,12 +66,40 @@ pub struct SigAction {
     pub mask: SigSet,
 }
 
+impl SigAction {
+    pub const fn empty() -> Self {
+        Self {
+            handler: 0,
+            flags: 0,
+            restorer: 0,
+            mask: SigSet::empty(),
+        }
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct StackT {
     pub ss_sp: u64,
     pub ss_flags: i32,
     pub ss_size: usize,
+}
+
+impl StackT {
+    pub const fn disabled() -> Self {
+        Self {
+            ss_sp: 0,
+            ss_flags: 2,
+            ss_size: 0,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct TimeSpec {
+    pub tv_sec: i64,
+    pub tv_nsec: i64,
 }
 
 #[repr(C)]
@@ -84,4 +118,24 @@ pub struct SysInfo {
     pub freehigh: u64,
     pub mem_unit: u32,
     pub _pad: [u8; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct SyscallFrame {
+    pub rbp: u64,
+    pub r15: u64,
+    pub r14: u64,
+    pub r13: u64,
+    pub r12: u64,
+    pub r9: u64,
+    pub r8: u64,
+    pub rsi: u64,
+    pub rdi: u64,
+    pub rdx: u64,
+    pub rbx: u64,
+    pub rax: u64,
+    pub rcx: u64,
+    pub r11: u64,
+    pub r10: u64,
 }

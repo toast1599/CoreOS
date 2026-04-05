@@ -7,6 +7,7 @@ use crate::syscall::result::{self, SysError, SysResult};
 
 const PROT_EXEC: u32 = 0x1;
 const PROT_WRITE: u32 = 0x2;
+const MAP_SHARED: u32 = 0x01;
 const MAP_PRIVATE: u32 = 0x02;
 const MAP_FIXED: u32 = 0x10;
 const MAP_ANONYMOUS: u32 = 0x20;
@@ -79,11 +80,15 @@ pub unsafe fn mmap(args_ptr: u64) -> u64 {
 unsafe fn mmap_impl(args_ptr: u64) -> SysResult {
     let args: MmapArgs = result::option(helpers::copy_struct_from_user(args_ptr), SysError::Fault)?;
     result::ensure(args.len != 0, SysError::Invalid)?;
-    result::ensure(
-        (args.flags & MAP_PRIVATE) != 0 && (args.flags & MAP_ANONYMOUS) != 0,
-        SysError::Invalid,
-    )?;
-    result::ensure(args.fd == -1 && args.off == 0, SysError::Unsupported)?;
+    result::ensure((args.flags & (MAP_PRIVATE | MAP_SHARED)) != 0, SysError::Invalid)?;
+    result::ensure((args.flags & MAP_SHARED) == 0, SysError::Unsupported)?;
+    let anonymous = (args.flags & MAP_ANONYMOUS) != 0;
+    if anonymous {
+        result::ensure(args.fd == -1 && args.off == 0, SysError::Invalid)?;
+    } else {
+        result::ensure(args.fd >= 0, SysError::BadFd)?;
+        result::ensure(args.off >= 0 && (args.off as usize & 0xFFF) == 0, SysError::Invalid)?;
+    }
 
     let len = ((args.len as usize) + 0xFFF) & !0xFFF;
     let start = if args.addr == 0 {
@@ -102,13 +107,45 @@ unsafe fn mmap_impl(args_ptr: u64) -> SysResult {
 
     let pml4 = task::current_pml4();
     let flags = map_flags_from_prot(args.prot);
+    let file_seed = if anonymous {
+        None
+    } else {
+        match proc::descriptor_info(args.fd as usize) {
+            Some(proc::DescriptorInfo::File { file_idx, .. }) => {
+                Some(crate::vfs::read_range(file_idx, args.off as usize, len).unwrap_or_default())
+            }
+            _ => return result::err(SysError::BadFd),
+        }
+    };
+
+    let mut mapped = 0usize;
     for off in (0..len).step_by(0x1000) {
         let frame = pmm::alloc_frame();
         if frame == 0 {
-            return result::err(SysError::Invalid);
+            for undo in (0..mapped).step_by(0x1000) {
+                if let Some(old_frame) = paging::unmap_page_in(pml4, start + undo) {
+                    pmm::free_frame(old_frame);
+                }
+            }
+            if let Some(vma) = proc::find_vma_exact_mut(start, len) {
+                *vma = proc::VmRegion::empty();
+            }
+            return result::err(SysError::NoMem);
         }
         paging::map_page_in(pml4, start + off, frame, flags);
         core::ptr::write_bytes(paging::p2v(frame) as *mut u8, 0, 0x1000);
+        if let Some(bytes) = file_seed.as_ref() {
+            let src = off.min(bytes.len());
+            let end = (off + 0x1000).min(bytes.len());
+            if src < end {
+                core::ptr::copy_nonoverlapping(
+                    bytes[src..end].as_ptr(),
+                    (start + off) as *mut u8,
+                    end - src,
+                );
+            }
+        }
+        mapped += 0x1000;
     }
     result::ok(start as u64)
 }

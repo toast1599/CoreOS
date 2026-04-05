@@ -1,5 +1,6 @@
 /// Task management — kernel stacks + round-robin scheduler support.
 use crate::mem::pmm::{alloc_frames, PAGE_SIZE};
+use crate::syscall::types::SyscallFrame;
 
 const SYSCALL_FRAME_SIZE: usize = 16 * 8;
 
@@ -142,6 +143,7 @@ pub unsafe fn next_task_switch() -> Option<(*mut usize, usize, usize, u64)> {
                 cur.state = TaskState::Ready;
             }
             if cur.state == TaskState::Dead {
+                super::task_slot_reaped(CURRENT);
                 TASKS[CURRENT] = None;
                 &raw mut DEAD_RSP
             } else {
@@ -162,9 +164,9 @@ pub unsafe fn next_task_switch() -> Option<(*mut usize, usize, usize, u64)> {
     crate::arch::gdt::TSS_RSP0 = next_stack_top as u64;
 
     let next_task = TASKS[next_idx].as_ref().unwrap();
-    let fs_base = super::PROCESSES[next_idx]
+    let fs_base = super::THREADS[next_idx]
         .as_ref()
-        .map(|process| process.fs_base)
+        .map(|thread| thread.fs_base)
         .unwrap_or(0);
 
     Some((old_rsp_ptr, next_task.rsp, next_task.pml4, fs_base))
@@ -306,6 +308,12 @@ pub unsafe fn spawn_forked_task(syscall_frame: *const u8, pml4: usize) -> Option
 
     crate::dbg_log!("TASK", "forked user task {} in slot {}", id, slot);
     Some(slot)
+}
+
+pub unsafe fn task_frame_mut(slot: usize) -> Option<&'static mut SyscallFrame> {
+    let task = TASKS.get(slot)?.as_ref()?;
+    let frame_ptr = task.rsp + core::mem::size_of::<Context>() + 8;
+    Some(&mut *(frame_ptr as *mut SyscallFrame))
 }
 
 /// Trampoline — called via ret from switch_to,

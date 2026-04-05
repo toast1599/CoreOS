@@ -133,12 +133,11 @@ char *getcwd(char *buf, size_t size) {
 }
 
 int chdir(const char *path) {
-    return sys_chdir(path, str_len(path));
+    return sys_chdir(path);
 }
 
 int truncate(const char *path, off_t length) {
-    if (length != 0) return -1;
-    return sys_truncate(path, str_len(path));
+    return sys_truncate(path, length);
 }
 
 int ftruncate(int fd, off_t length) {
@@ -155,6 +154,14 @@ int gettimeofday(struct timeval *tv, void *tz) {
 
 int sigaltstack(const stack_t *ss, stack_t *old_ss) {
     return sys_sigaltstack(ss, old_ss);
+}
+
+int sigaction(int sig, const struct sigaction *act, struct sigaction *oldact) {
+    return sys_rt_sigaction(sig, act, oldact, sizeof(sigset_t));
+}
+
+int sigprocmask(int how, const sigset_t *set, sigset_t *oldset) {
+    return sys_rt_sigprocmask(how, set, oldset, sizeof(sigset_t));
 }
 
 unsigned int umask(unsigned int mask) {
@@ -174,8 +181,7 @@ ssize_t sendfile(int out_fd, int in_fd, off_t *offset, size_t count) {
 }
 
 int faccessat(int dirfd, const char *path, int mode, int flags) {
-    if (flags != 0) return -1;
-    return sys_faccessat(dirfd, path, str_len(path), mode);
+    return sys_faccessat(dirfd, path, mode, flags);
 }
 
 int sysinfo(struct sysinfo *info) {
@@ -223,12 +229,30 @@ int fork(void) {
     return sys_fork();
 }
 
+int open(const char *path, int flags, ...) {
+    va_list ap;
+    int mode = 0;
+    va_start(ap, flags);
+    if (flags & O_CREAT) {
+        mode = va_arg(ap, int);
+    }
+    va_end(ap);
+    return sys_open(path, flags, mode);
+}
+
 int openat(int dirfd, const char *path, int flags, ...) {
-    return sys_openat(dirfd, path, str_len(path), flags);
+    va_list ap;
+    int mode = 0;
+    va_start(ap, flags);
+    if (flags & O_CREAT) {
+        mode = va_arg(ap, int);
+    }
+    va_end(ap);
+    return sys_openat(dirfd, path, flags, mode);
 }
 
 int unlinkat(int dirfd, const char *path, int flags) {
-    return sys_unlinkat(dirfd, path, str_len(path), flags);
+    return sys_unlinkat(dirfd, path, flags);
 }
 
 ssize_t readlink(const char *path, char *buf, size_t bufsiz) {
@@ -248,7 +272,7 @@ int arch_prctl(int code, unsigned long addr) {
 }
 
 int stat(const char *path, struct stat *st) {
-    return sys_fstatat(AT_FDCWD, path, str_len(path), st);
+    return sys_fstatat(AT_FDCWD, path, st, 0);
 }
 
 // ---------------------------------------------------------------------------

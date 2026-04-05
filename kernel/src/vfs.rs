@@ -30,6 +30,16 @@ pub fn clone_bytes(name: &[char]) -> Option<Vec<u8>> {
     with_fs(|fs| fs.find(name).map(|f| f.data.clone())).flatten()
 }
 
+pub fn read_range(file_idx: usize, offset: usize, len: usize) -> Option<Vec<u8>> {
+    with_fs(|fs| {
+        let file = fs.files.get(file_idx)?;
+        let start = offset.min(file.data.len());
+        let end = start.saturating_add(len).min(file.data.len());
+        Some(file.data[start..end].to_vec())
+    })
+    .flatten()
+}
+
 pub fn append_all(name: &[char], bytes: &[u8]) -> bool {
     with_fs_mut(|fs| {
         let Some(file) = fs.find_mut(name) else {

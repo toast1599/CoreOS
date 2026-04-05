@@ -7,6 +7,10 @@ use crate::syscall::types::Termios;
 use crate::syscall::types::WinSize;
 use crate::syscall::types::{TCGETS, TIOCGWINSZ};
 
+const O_ACCMODE: u32 = crate::proc::O_ACCMODE;
+const O_RDONLY: u32 = crate::proc::O_RDONLY;
+const O_WRONLY: u32 = crate::proc::O_WRONLY;
+
 // ---------------------------------------------------------------------------
 // syscall implementations
 // ---------------------------------------------------------------------------
@@ -97,7 +101,7 @@ unsafe fn ioctl_impl(fd: u64, req: u64, argp: u64) -> SysResult {
             crate::proc::descriptor_info(fd as usize),
             Some(DescriptorInfo::Stdio { .. })
         ),
-        SysError::BadFd,
+        SysError::NotTty,
     )?;
 
     match req {
@@ -137,7 +141,7 @@ unsafe fn ioctl_impl(fd: u64, req: u64, argp: u64) -> SysResult {
             result::ensure(helpers::copy_struct_to_user(argp, &winsz), SysError::Fault)?;
             result::ok(0u64)
         }
-        _ => result::err(SysError::Unsupported),
+        _ => result::err(SysError::NotTty),
     }
 }
 
@@ -148,10 +152,12 @@ pub unsafe fn pread64(fd: u64, buf_ptr: u64, count: u64, offset: u64) -> u64 {
 unsafe fn pread64_impl(fd: u64, buf_ptr: u64, count: u64, offset: u64) -> SysResult {
     let len = count as usize;
     result::ensure(crate::usercopy::user_range_ok(buf_ptr, len), SysError::Fault)?;
+    let status = result::option(crate::proc::get_status_flags(fd as usize), SysError::BadFd)?;
+    result::ensure((status & O_ACCMODE) != O_WRONLY, SysError::BadFd)?;
     let DescriptorInfo::File { file_idx, .. } =
         result::option(crate::proc::descriptor_info(fd as usize), SysError::BadFd)?
     else {
-        return result::err(SysError::Unsupported);
+        return result::err(SysError::NotSeekable);
     };
 
     let bytes = result::option(crate::syscall::fs::fs_read_to_vec(file_idx, offset as usize, len), SysError::BadFd)?;
@@ -166,10 +172,12 @@ pub unsafe fn pwrite64(fd: u64, buf_ptr: u64, count: u64, offset: u64) -> u64 {
 unsafe fn pwrite64_impl(fd: u64, buf_ptr: u64, count: u64, offset: u64) -> SysResult {
     let len = count as usize;
     result::ensure(crate::usercopy::user_range_ok(buf_ptr, len), SysError::Fault)?;
+    let status = result::option(crate::proc::get_status_flags(fd as usize), SysError::BadFd)?;
+    result::ensure((status & O_ACCMODE) != O_RDONLY, SysError::BadFd)?;
     let DescriptorInfo::File { file_idx, .. } =
         result::option(crate::proc::descriptor_info(fd as usize), SysError::BadFd)?
     else {
-        return result::err(SysError::Unsupported);
+        return result::err(SysError::NotSeekable);
     };
 
     let mut bytes = alloc::vec![0u8; len];
@@ -227,10 +235,12 @@ pub unsafe fn sendfile(out_fd: u64, in_fd: u64, offset_ptr: u64, count: u64) -> 
 
 unsafe fn sendfile_impl(out_fd: u64, in_fd: u64, offset_ptr: u64, count: u64) -> SysResult {
     let count = count as usize;
+    let status = result::option(crate::proc::get_status_flags(in_fd as usize), SysError::BadFd)?;
+    result::ensure((status & O_ACCMODE) != O_WRONLY, SysError::BadFd)?;
     let DescriptorInfo::File { file_idx, .. } =
         result::option(crate::proc::descriptor_info(in_fd as usize), SysError::BadFd)?
     else {
-        return result::err(SysError::Unsupported);
+        return result::err(SysError::NotSeekable);
     };
 
     let start_offset = if offset_ptr != 0 {

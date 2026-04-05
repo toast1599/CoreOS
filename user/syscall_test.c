@@ -236,7 +236,7 @@ static void test_fs_and_fd(void) {
   check(unlinkat(AT_FDCWD, TEST_FILE_UNLINK, 0) == 0, "unlinkat", 0);
   check(faccessat(AT_FDCWD, TEST_FILE_UNLINK, F_OK, 0) == -1, "unlinkat_gone", 0);
 
-  int fd = sys_open(TEST_FILE, str_len(TEST_FILE));
+  int fd = sys_open(TEST_FILE, O_RDONLY, 0);
   check(fd >= 3, "open", fd);
   if (fd < 3)
     return;
@@ -336,7 +336,7 @@ static void test_processes(void) {
     check(code == 17, "waitpid_exit_group", code);
   }
 
-  long exec_pid = sys_exec(CHILD_FILE, str_len(CHILD_FILE));
+  long exec_pid = sys_exec(CHILD_FILE);
   check(exec_pid > 0, "exec", exec_pid);
   if (exec_pid > 0) {
     long code = sys_waitpid(exec_pid);

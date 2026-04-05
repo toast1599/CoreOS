@@ -19,6 +19,7 @@ pub const PUSH_FILE: u64 = 10;
 pub const BRK: u64 = 12;
 pub const RT_SIGACTION: u64 = 13;
 pub const RT_SIGPROCMASK: u64 = 14;
+pub const RT_SIGRETURN: u64 = 15;
 pub const IOCTL: u64 = 16;
 pub const PREAD64: u64 = 17;
 pub const PWRITE64: u64 = 18;
@@ -56,6 +57,7 @@ pub const GETPEERNAME: u64 = 52;
 pub const SOCKETPAIR: u64 = 53;
 pub const SETSOCKOPT: u64 = 54;
 pub const GETSOCKOPT: u64 = 55;
+pub const CLONE: u64 = 56;
 pub const EXEC: u64 = 57;
 pub const FORK: u64 = 58;
 pub const EXIT: u64 = 60;
@@ -89,15 +91,20 @@ pub const SIGALTSTACK: u64 = 131;
 pub const ARCH_PRCTL: u64 = 158;
 pub const SETRLIMIT: u64 = 160;
 pub const GETTID: u64 = 186;
+pub const TKILL: u64 = 200;
+pub const FUTEX: u64 = 202;
 pub const SET_TID_ADDRESS: u64 = 218;
 pub const CLOCK_GETTIME: u64 = 228;
 pub const CLOCK_NANOSLEEP: u64 = 230;
 pub const EXIT_GROUP: u64 = 231;
+pub const TGKILL: u64 = 234;
 pub const OPENAT: u64 = 257;
 pub const FSTATAT: u64 = 262;
 pub const UNLINKAT: u64 = 263;
 pub const READLINKAT: u64 = 267;
 pub const FACCESSAT: u64 = 269;
+pub const SET_ROBUST_LIST: u64 = 273;
+pub const GET_ROBUST_LIST: u64 = 274;
 pub const ACCEPT4: u64 = 288;
 pub const DUP3: u64 = 292;
 pub const PIPE2: u64 = 293;
@@ -121,6 +128,7 @@ pub const ALL: &[SyscallMeta] = &[
     SyscallMeta { number: BRK, name: "brk" },
     SyscallMeta { number: RT_SIGACTION, name: "rt_sigaction" },
     SyscallMeta { number: RT_SIGPROCMASK, name: "rt_sigprocmask" },
+    SyscallMeta { number: RT_SIGRETURN, name: "rt_sigreturn" },
     SyscallMeta { number: IOCTL, name: "ioctl" },
     SyscallMeta { number: PREAD64, name: "pread64" },
     SyscallMeta { number: PWRITE64, name: "pwrite64" },
@@ -158,7 +166,8 @@ pub const ALL: &[SyscallMeta] = &[
     SyscallMeta { number: SOCKETPAIR, name: "socketpair" },
     SyscallMeta { number: SETSOCKOPT, name: "setsockopt" },
     SyscallMeta { number: GETSOCKOPT, name: "getsockopt" },
-    SyscallMeta { number: EXEC, name: "exec" },
+    SyscallMeta { number: CLONE, name: "clone" },
+    SyscallMeta { number: EXEC, name: "execve" },
     SyscallMeta { number: FORK, name: "fork" },
     SyscallMeta { number: EXIT, name: "exit" },
     SyscallMeta { number: WAITPID, name: "waitpid" },
@@ -191,15 +200,20 @@ pub const ALL: &[SyscallMeta] = &[
     SyscallMeta { number: ARCH_PRCTL, name: "arch_prctl" },
     SyscallMeta { number: SETRLIMIT, name: "setrlimit" },
     SyscallMeta { number: GETTID, name: "gettid" },
+    SyscallMeta { number: TKILL, name: "tkill" },
+    SyscallMeta { number: FUTEX, name: "futex" },
     SyscallMeta { number: SET_TID_ADDRESS, name: "set_tid_address" },
     SyscallMeta { number: CLOCK_GETTIME, name: "clock_gettime" },
     SyscallMeta { number: CLOCK_NANOSLEEP, name: "clock_nanosleep" },
     SyscallMeta { number: EXIT_GROUP, name: "exit_group" },
+    SyscallMeta { number: TGKILL, name: "tgkill" },
     SyscallMeta { number: OPENAT, name: "openat" },
     SyscallMeta { number: FSTATAT, name: "fstatat" },
     SyscallMeta { number: UNLINKAT, name: "unlinkat" },
     SyscallMeta { number: READLINKAT, name: "readlinkat" },
     SyscallMeta { number: FACCESSAT, name: "faccessat" },
+    SyscallMeta { number: SET_ROBUST_LIST, name: "set_robust_list" },
+    SyscallMeta { number: GET_ROBUST_LIST, name: "get_robust_list" },
     SyscallMeta { number: ACCEPT4, name: "accept4" },
     SyscallMeta { number: DUP3, name: "dup3" },
     SyscallMeta { number: PIPE2, name: "pipe2" },
@@ -225,6 +239,7 @@ pub fn name(number: u64) -> Option<&'static str> {
         BRK => Some("brk"),
         RT_SIGACTION => Some("rt_sigaction"),
         RT_SIGPROCMASK => Some("rt_sigprocmask"),
+        RT_SIGRETURN => Some("rt_sigreturn"),
         IOCTL => Some("ioctl"),
         PREAD64 => Some("pread64"),
         PWRITE64 => Some("pwrite64"),
@@ -262,7 +277,8 @@ pub fn name(number: u64) -> Option<&'static str> {
         SOCKETPAIR => Some("socketpair"),
         SETSOCKOPT => Some("setsockopt"),
         GETSOCKOPT => Some("getsockopt"),
-        EXEC => Some("exec"),
+        CLONE => Some("clone"),
+        EXEC => Some("execve"),
         FORK => Some("fork"),
         EXIT => Some("exit"),
         WAITPID => Some("waitpid"),
@@ -295,15 +311,20 @@ pub fn name(number: u64) -> Option<&'static str> {
         ARCH_PRCTL => Some("arch_prctl"),
         SETRLIMIT => Some("setrlimit"),
         GETTID => Some("gettid"),
+        TKILL => Some("tkill"),
+        FUTEX => Some("futex"),
         SET_TID_ADDRESS => Some("set_tid_address"),
         CLOCK_GETTIME => Some("clock_gettime"),
         CLOCK_NANOSLEEP => Some("clock_nanosleep"),
         EXIT_GROUP => Some("exit_group"),
+        TGKILL => Some("tgkill"),
         OPENAT => Some("openat"),
         FSTATAT => Some("fstatat"),
         UNLINKAT => Some("unlinkat"),
         READLINKAT => Some("readlinkat"),
         FACCESSAT => Some("faccessat"),
+        SET_ROBUST_LIST => Some("set_robust_list"),
+        GET_ROBUST_LIST => Some("get_robust_list"),
         ACCEPT4 => Some("accept4"),
         DUP3 => Some("dup3"),
         PIPE2 => Some("pipe2"),

@@ -51,10 +51,10 @@ pub struct InterruptFrame {
     pub rcx: u64,
     pub rbx: u64,
     pub rax: u64,
-    // Pushed by stub
+    pub padding: u64,
+    // Pushed by stub / CPU in a normalized order.
     pub vector: u64,
     pub error_code: u64,
-    pub padding: u64,
     // Pushed by CPU
     pub rip: u64,
     pub cs: u64,
