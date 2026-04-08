@@ -13,3 +13,6 @@ NvVars
 
 # context
 .project_context.md
+
+# C stdlib (please understand for now)
+musl/

@@ -45,3 +45,20 @@ pub unsafe fn write_fs_base(value: u64) {
         options(nostack, nomem)
     );
 }
+
+#[inline]
+pub unsafe fn push_cli() -> bool {
+    let enabled = interrupts_enabled();
+    if enabled {
+        cli();
+    }
+    enabled
+}
+
+#[inline]
+pub unsafe fn pop_cli(was_enabled: bool) {
+    if was_enabled {
+        sti();
+    }
+}
+

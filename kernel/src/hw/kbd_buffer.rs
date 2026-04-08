@@ -20,9 +20,10 @@ impl KeyBuffer {
         }
     }
 
-    #[allow(dead_code)]
     pub fn push(&self, c: char) {
         unsafe {
+            let flags = crate::arch::amd64::cpu::push_cli();
+
             let head = *self.head.get();
             let next = (head + 1) % BUF_SIZE;
 
@@ -30,26 +31,38 @@ impl KeyBuffer {
                 (*self.buf.get())[head] = c;
                 *self.head.get() = next;
             }
+
+            crate::arch::amd64::cpu::pop_cli(flags);
         }
     }
 
     pub fn pop(&self) -> Option<char> {
         unsafe {
+            let flags = crate::arch::amd64::cpu::push_cli();
+
             let tail = *self.tail.get();
             if tail == *self.head.get() {
+                crate::arch::amd64::cpu::pop_cli(flags);
                 return None;
             }
 
             let c = (*self.buf.get())[tail];
             *self.tail.get() = (tail + 1) % BUF_SIZE;
+
+            crate::arch::amd64::cpu::pop_cli(flags);
             Some(c)
         }
     }
+
     #[allow(dead_code)]
     pub fn flush(&self) {
         unsafe {
+            let flags = crate::arch::amd64::cpu::push_cli();
+
             *self.head.get() = 0;
             *self.tail.get() = 0;
+
+            crate::arch::amd64::cpu::pop_cli(flags);
         }
     }
 }
