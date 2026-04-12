@@ -20,20 +20,12 @@ KERNEL_ELF = kernel/target/x86_64-unknown-none/release/kernel
 KERNEL_BIN = $(ESP_DIR)/kernel.bin
 
 # =========================
-# Bootloader (C UEFI)
+# Bootloader (Rust UEFI)
 # =========================
 
-LOADER_SRC = bootloader/main.c
+LOADER_CRATE = bootloader
+LOADER_BUILD_EFI = $(LOADER_CRATE)/target/x86_64-unknown-uefi/release/rust-loader.efi
 LOADER_EFI = $(EFI_BOOT)/BOOTX64.EFI
-
-CFLAGS  = -target x86_64-pc-win32 \
-          -I/usr/include/efi \
-          -I/usr/include/efi/x86_64 \
-          -ffreestanding -fshort-wchar -mno-red-zone
-
-LDFLAGS = /subsystem:efi_application \
-          /entry:efi_main \
-          /base:0x0
 
 .PHONY: all clean run dirs syscall-api
 
@@ -66,10 +58,10 @@ $(KERNEL_BIN): dirs $(SYSCALL_OUT) $(USER_ELFS)
 # Build UEFI Bootloader
 # =========================
 
-$(LOADER_EFI): dirs $(LOADER_SRC)
-	clang $(CFLAGS) -c $(LOADER_SRC) -o $(BUILD_DIR)/main.o
-	lld-link $(LDFLAGS) /out:$(LOADER_EFI) $(BUILD_DIR)/main.o
-	rm $(BUILD_DIR)/main.o
+$(LOADER_EFI): dirs $(LOADER_CRATE)/Cargo.toml $(wildcard $(LOADER_CRATE)/src/*.rs)
+	cd $(LOADER_CRATE) && \
+	cargo build --release --target x86_64-unknown-uefi --locked --offline
+	cp $(LOADER_BUILD_EFI) $(LOADER_EFI)
 
 # =========================
 # Build Disk Image
@@ -96,15 +88,31 @@ $(USER_ELFS): dirs $(SYSCALL_OUT)
 # =========================
 
 run: $(IMAGE)
+	tmp_img=/tmp/coreos-run-$$$$.img; \
+	cp $(IMAGE) $$tmp_img; \
+	qemu-system-x86_64 \
+		-snapshot \
+		-bios /usr/share/ovmf/x64/OVMF.4m.fd \
+		-drive file=$$tmp_img,format=raw,if=ide \
+		-net none \
+		-serial stdio \
+		-display none \
+		-m 512M \
+		-no-reboot -no-shutdown; \
+	rm -f $$tmp_img
+
+run-gfx: $(IMAGE)
+	tmp_img=/tmp/coreos-run-gfx-$$$$.img; \
+	cp $(IMAGE) $$tmp_img; \
 	qemu-system-x86_64 \
 		-bios /usr/share/ovmf/x64/OVMF.4m.fd \
-		-drive file=$(IMAGE),format=raw,if=ide \
+		-drive file=$$tmp_img,format=raw,if=ide \
 		-net none \
 		-serial stdio \
 		-vga std \
 		-m 512M \
-		-d cpu_reset \
-		-no-reboot -no-shutdown \
+		-no-reboot -no-shutdown; \
+	rm -f $$tmp_img
 # =========================
 # Project Context Dump
 # =========================
