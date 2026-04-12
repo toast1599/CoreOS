@@ -38,6 +38,8 @@ pub unsafe fn boot_info_high_half(
         }; 256],
         mmap_count: 0,
         _pad: 0,
+        kernel_phys_base: 0,
+        kernel_alloc_size: 0,
         user_elf_base: 0,
         user_elf_size: 0,
         font_base: 0,

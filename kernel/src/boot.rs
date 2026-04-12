@@ -25,6 +25,9 @@ pub struct CoreOS_BootInfo {
     pub mmap_count: u32,
     pub _pad: u32,
 
+    pub kernel_phys_base: u64,
+    pub kernel_alloc_size: u64,
+
     pub user_elf_base: u64,
     pub user_elf_size: u64,
 

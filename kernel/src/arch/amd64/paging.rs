@@ -10,6 +10,7 @@ const PTE_NX: u64 = 1 << 63;
 const PTE_ADDR_MASK: u64 = 0x000f_ffff_ffff_f000;
 
 pub const PHYSICAL_OFFSET: usize = 0xFFFF800000000000;
+const KERNEL_IMAGE_BASE: usize = 0xFFFFFFFF80100000;
 pub static mut KERNEL_PML4: usize = 0;
 
 #[derive(Clone, Copy)]
@@ -117,15 +118,6 @@ pub unsafe fn init(boot_info: *const CoreOS_BootInfo) {
             pd as u64 | PTE_PRESENT | PTE_WRITABLE,
         );
 
-        // Also map the first 1GB into Kernel Map (k_pdpt[510])
-        if i == 0 {
-            write_entry(
-                k_pdpt,
-                510,
-                pd as u64 | PTE_PRESENT | PTE_WRITABLE,
-            );
-        }
-
         for j in 0..512usize {
             let phys = ((i * 512 + j) as u64) * (2 * 1024 * 1024);
             write_entry(
@@ -135,6 +127,12 @@ pub unsafe fn init(boot_info: *const CoreOS_BootInfo) {
             );
         }
     }
+
+    let kernel_phys_base =
+        core::ptr::read_unaligned(addr_of!((*boot_info).kernel_phys_base)) as usize;
+    let kernel_alloc_size =
+        core::ptr::read_unaligned(addr_of!((*boot_info).kernel_alloc_size)) as usize;
+    map_range_4k(pml4, KERNEL_IMAGE_BASE, kernel_phys_base, kernel_alloc_size);
 
     let fb_base = core::ptr::read_unaligned(addr_of!((*boot_info).fb_base)) as usize;
     let fb_size = core::ptr::read_unaligned(addr_of!((*boot_info).fb_size)) as usize;
@@ -185,6 +183,27 @@ unsafe fn map_range_2mb(pml4: usize, virt_start: usize, phys_start: usize, size:
 
         virt += two_mb;
         phys += two_mb;
+    }
+}
+
+unsafe fn map_range_4k(pml4: usize, virt_start: usize, phys_start: usize, size: usize) {
+    let mut virt = virt_start;
+    let mut phys = phys_start;
+    let virt_end = virt_start + size.div_ceil(0x1000) * 0x1000;
+
+    while virt < virt_end {
+        map_page_in(
+            pml4,
+            virt,
+            phys,
+            MapFlags {
+                writable: true,
+                user: false,
+                executable: true,
+            },
+        );
+        virt += 0x1000;
+        phys += 0x1000;
     }
 }
 

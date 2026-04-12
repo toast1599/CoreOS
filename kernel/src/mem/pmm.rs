@@ -24,7 +24,7 @@ unsafe fn is_free(f: usize) -> bool {
     (BITMAP[f / 8] & (1 << (f % 8))) == 0
 }
 
-pub unsafe fn init(boot_info: *const CoreOS_BootInfo, kernel_end_phys: usize) {
+pub unsafe fn init(boot_info: *const CoreOS_BootInfo) {
     crate::serial_fmt!("pmm::init begin\n");
     let mmap_count = core::ptr::read_unaligned(addr_of!((*boot_info).mmap_count)) as usize;
     crate::serial_fmt!("pmm::init mmap_count={}\n", mmap_count);
@@ -63,8 +63,12 @@ pub unsafe fn init(boot_info: *const CoreOS_BootInfo, kernel_end_phys: usize) {
     }
     crate::serial_fmt!("pmm::init mmap parsed\n");
 
-    let kernel_start_frame = 0x100000 / PAGE_SIZE;
-    let kernel_end_frame = (kernel_end_phys + PAGE_SIZE - 1) / PAGE_SIZE;
+    let kernel_phys_base =
+        core::ptr::read_unaligned(addr_of!((*boot_info).kernel_phys_base)) as usize;
+    let kernel_alloc_size =
+        core::ptr::read_unaligned(addr_of!((*boot_info).kernel_alloc_size)) as usize;
+    let kernel_start_frame = kernel_phys_base / PAGE_SIZE;
+    let kernel_end_frame = (kernel_phys_base + kernel_alloc_size + PAGE_SIZE - 1) / PAGE_SIZE;
     for f in kernel_start_frame..kernel_end_frame {
         if f < MAX_FRAMES && is_free(f) {
             set_used(f);
