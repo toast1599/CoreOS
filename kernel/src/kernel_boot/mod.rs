@@ -31,6 +31,7 @@ pub unsafe fn boot_kernel(
     bench::stamp(bench::Phase::PmmDone);
 
     crate::mem::pmm_test::test_pmm_basic();
+    crate::selftest::run_boot_sanity_suite();
 
     let assets = cache_boot_assets(boot_info);
 

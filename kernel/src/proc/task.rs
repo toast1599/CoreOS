@@ -2,8 +2,6 @@
 use crate::mem::pmm::{alloc_frames, PAGE_SIZE};
 use crate::syscall::types::SyscallFrame;
 
-const SYSCALL_FRAME_SIZE: usize = 16 * 8;
-
 #[repr(C)]
 pub struct Context {
     pub r15: u64,
@@ -278,8 +276,12 @@ pub unsafe fn spawn_forked_task(syscall_frame: *const u8, pml4: usize) -> Option
     let stack_base = crate::arch::paging::p2v(stack_phys);
     let kstack_top = stack_base + stack_pages * PAGE_SIZE;
 
-    let frame_start = kstack_top - SYSCALL_FRAME_SIZE;
-    core::ptr::copy_nonoverlapping(syscall_frame, frame_start as *mut u8, SYSCALL_FRAME_SIZE);
+    let frame_start = kstack_top - crate::arch::context::SYSCALL_FRAME_SIZE;
+    core::ptr::copy_nonoverlapping(
+        syscall_frame,
+        frame_start as *mut u8,
+        crate::arch::context::SYSCALL_FRAME_SIZE,
+    );
     ((frame_start + 88) as *mut u64).write(0);
 
     let mut sp = frame_start;

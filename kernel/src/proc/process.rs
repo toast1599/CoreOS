@@ -2,7 +2,8 @@ use core::sync::atomic::Ordering;
 use crate::syscall::types::{SigAction, SigSet, StackT};
 
 use super::{
-    default_fd_flags, default_fds, task, Process, ProcessState, Thread, ThreadState, VmRegion,
+    default_fd_flags, default_fds, state::KernelState, task, Process, ProcessState, Thread,
+    ThreadState, VmRegion,
     MMAP_BASE, NEXT_PID, PROCESSES, THREADS,
 };
 
@@ -104,26 +105,26 @@ pub unsafe fn current_exe_path() -> ([u8; super::EXE_PATH_MAX], usize) {
 
 pub unsafe fn current_thread_mut() -> Option<&'static mut Thread> {
     if let Some(slot) = task::current_task_slot() {
-        return THREADS[slot].as_mut();
+        return KernelState::thread_mut(slot);
     }
     None
 }
 
 pub unsafe fn current_thread() -> Option<&'static Thread> {
     if let Some(slot) = task::current_task_slot() {
-        return THREADS[slot].as_ref();
+        return KernelState::thread(slot);
     }
     None
 }
 
 pub unsafe fn current_process_mut() -> Option<&'static mut Process> {
     let group_slot = current_thread()?.group_slot;
-    PROCESSES[group_slot].as_mut()
+    KernelState::process_mut(group_slot)
 }
 
 pub unsafe fn current_process() -> Option<&'static Process> {
     let group_slot = current_thread()?.group_slot;
-    PROCESSES[group_slot].as_ref()
+    KernelState::process(group_slot)
 }
 
 pub unsafe fn exit(code: i64) {
@@ -182,7 +183,7 @@ pub unsafe fn exit_thread(code: i64, whole_group: bool) -> bool {
 }
 
 pub unsafe fn task_slot_reaped(slot: usize) {
-    let Some(thread) = THREADS[slot].as_ref() else {
+    let Some(thread) = KernelState::thread(slot) else {
         return;
     };
     if thread.group_slot != slot {
@@ -193,7 +194,7 @@ pub unsafe fn task_slot_reaped(slot: usize) {
             thread.tid,
             thread.group_slot
         );
-        THREADS[slot] = None;
+        KernelState::clear_thread(slot);
     }
 }
 

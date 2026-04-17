@@ -31,6 +31,7 @@ mod fs;
 mod kernel_boot;
 mod panic;
 mod shell;
+mod selftest;
 mod vfs;
 
 use crate::mem::heap::SlabAllocator;

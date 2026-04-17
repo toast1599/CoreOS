@@ -53,3 +53,18 @@ impl RamFS {
 }
 
 pub static FILESYSTEM: crate::sync::SpinLock<Option<RamFS>> = crate::sync::SpinLock::new(None);
+
+pub fn selftest_ramfs_basic() {
+    crate::serial_fmt!("[SELFTEST] RamFS basic\n");
+    let mut fs = RamFS::new();
+
+    let alpha: [char; 5] = ['a', 'l', 'p', 'h', 'a'];
+    let beta: [char; 4] = ['b', 'e', 't', 'a'];
+
+    assert!(fs.create(&alpha));
+    assert!(!fs.create(&alpha));
+    assert!(fs.find(&alpha).is_some());
+    assert!(fs.find(&beta).is_none());
+    assert!(fs.remove(&alpha));
+    assert!(!fs.remove(&alpha));
+}

@@ -4,6 +4,7 @@ mod fd;
 pub mod fd_io;
 mod process;
 pub mod scheduler;
+pub mod state;
 pub mod task;
 mod vm;
 
@@ -239,3 +240,11 @@ pub use process::{
     current_fs_base, current_exe_path,
 };
 pub use vm::{alloc_vma, find_vma_exact_mut, region_conflicts, reserve_mmap_base};
+
+pub fn selftest_process_layout() {
+    crate::serial_fmt!("[SELFTEST] process layout\n");
+    assert!(MAX_FDS >= 3);
+    assert!(MAX_OPEN_FILES >= MAX_FDS);
+    assert!(MAX_PIPES > 0);
+    assert!(MAX_VMAS > 0);
+}
