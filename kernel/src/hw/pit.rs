@@ -29,9 +29,8 @@ pub extern "C" fn pit_handler(_stack: *mut u8) {
 pub fn sleep_yield(wait_ticks: u64) {
     let start = ticks();
     while ticks() - start < wait_ticks {
-        unsafe {
-            scheduler::yield_now();
-        }
+        scheduler::yield_now();
+
         for _ in 0..1000 {
             core::hint::spin_loop();
         }

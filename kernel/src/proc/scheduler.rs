@@ -15,99 +15,131 @@ use core::sync::atomic::{AtomicBool, Ordering};
 #[no_mangle]
 pub static IN_SYSCALL: AtomicBool = AtomicBool::new(false);
 
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
 /// Voluntarily yield the CPU to the next task.
-pub unsafe fn yield_now() {
-    let in_syscall = IN_SYSCALL.load(Ordering::Relaxed);
-    IN_SYSCALL.store(false, Ordering::Relaxed);
-    try_switch();
-    IN_SYSCALL.store(in_syscall, Ordering::Relaxed);
+pub fn yield_now() {
+    let prev = IN_SYSCALL.swap(false, Ordering::Relaxed);
+
+    unsafe {
+        try_switch();
+    }
+
+    IN_SYSCALL.store(prev, Ordering::Relaxed);
 }
 
-pub unsafe fn wait_for_event(spins: usize) {
-    let in_syscall = IN_SYSCALL.load(Ordering::Relaxed);
-    IN_SYSCALL.store(false, Ordering::Relaxed);
-    core::arch::asm!("sti", options(nostack, nomem));
+/// Wait while allowing interrupts (used for blocking-style waits).
+pub fn wait_for_event(spins: usize) {
+    let prev = IN_SYSCALL.swap(false, Ordering::Relaxed);
+
+    unsafe {
+        enable_interrupts();
+    }
+
     for _ in 0..spins {
         core::hint::spin_loop();
     }
-    core::arch::asm!("cli", options(nostack, nomem));
-    IN_SYSCALL.store(in_syscall, Ordering::Relaxed);
+
+    unsafe {
+        disable_interrupts();
+    }
+
+    IN_SYSCALL.store(prev, Ordering::Relaxed);
 }
 
-// TICKS is now centrally located in hw::pit::TICKS
-
-/// Called from the PIT interrupt handler (pit_handler in pit.rs).
+/// Called from PIT interrupt handler.
 pub fn tick() {
     let t = crate::hw::pit::ticks();
 
+    // switch every 10 ticks
     if t % 10 == 0 {
-        // switch every 10 ticks
         unsafe {
             try_switch();
         }
     }
 }
 
+// ---------------------------------------------------------------------------
+// Internal scheduling
+// ---------------------------------------------------------------------------
+
+#[inline]
 unsafe fn try_switch() {
+    // Do not preempt inside syscall critical section
     if IN_SYSCALL.load(Ordering::Relaxed) {
         return;
     }
+
     if let Some((old_rsp_ptr, new_rsp, new_pml4, new_fs_base)) = super::task::next_task_switch() {
         switch_to(old_rsp_ptr, new_rsp, new_pml4, new_fs_base);
     }
 }
 
+// ---------------------------------------------------------------------------
+// Interrupt helpers (isolated unsafe)
+// ---------------------------------------------------------------------------
+
+#[inline(always)]
+unsafe fn enable_interrupts() {
+    core::arch::asm!("sti", options(nostack, nomem));
+}
+
+#[inline(always)]
+unsafe fn disable_interrupts() {
+    core::arch::asm!("cli", options(nostack, nomem));
+}
+
+// ---------------------------------------------------------------------------
+// Context switch (the dangerous part)
+// ---------------------------------------------------------------------------
+
 /// Low-level context switch.
 ///
-/// Calling convention: ts lowk a normal Rust `extern "C"` function.
-/// It pushes/pops callee-saved regs (rbp, rbx, r12–r15) manually so
-/// that each task's stack contains exactly a `task::Context` when suspended.
-///
-/// Stack layout after the pushes (growing downward):
-///   [rsp+40] rbp
-///   [rsp+32] rbx
-///   [rsp+24] r12   (wait — push order matters, see asm below)
-///   ...
-///   [rsp+ 0] r15
-///
-/// The `ret` at the end pops the return address that was pushed when
-/// `switch_to` was first called for this task — i.e., the task entry point
-/// for a brand-new task, or the instruction after `switch_to` for a
-/// previously-running task.
+/// SAFETY:
+/// - Caller must ensure `old_rsp` is valid
+/// - `new_rsp` must point to a valid saved context
+/// - `new_pml4` must be a valid page table
+/// - `new_fs_base` must be valid for the target task
 #[unsafe(naked)]
-unsafe extern "C" fn switch_to(old_rsp: *mut usize, new_rsp: usize, new_pml4: usize, new_fs_base: u64) {
-    // rdi = old_rsp pointer, rsi = new_rsp value, rdx = new_pml4, rcx = new_fs_base
+unsafe extern "C" fn switch_to(
+    old_rsp: *mut usize,
+    new_rsp: usize,
+    new_pml4: usize,
+    new_fs_base: u64,
+) {
     core::arch::naked_asm!(
-        // Save callee-saved registers onto current stack
+        // Save callee-saved registers
         "push rbp",
         "push rbx",
         "push r12",
         "push r13",
         "push r14",
         "push r15",
-        // Save current rsp into *old_rsp
+        // Save current stack pointer
         "mov [rdi], rsp",
-        // Restore the target task's address space
+        // Switch address space
         "mov cr3, rdx",
-        // Restore the target task's user FS.base for TLS.
+        // Write FS.base (TLS)
         "mov eax, ecx",
         "shr rcx, 32",
         "mov edx, ecx",
         "mov ecx, 0xC0000100",
         "wrmsr",
-        // Switch to new stack
+        // Switch stack
         "mov rsp, rsi",
-        // Restore callee-saved registers from new stack
+        // Restore callee-saved registers
         "pop r15",
         "pop r14",
         "pop r13",
         "pop r12",
         "pop rbx",
         "pop rbp",
-        // Re-enable interrupts — iretq never runs when we switch stacks,
-        // so rflags.IF is never restored. Do it manually.
+        // Re-enable interrupts (explicit)
         "sti",
-        // Return to new task (pops saved rip)
+        // Jump into new task
         "ret",
     );
 }
+
