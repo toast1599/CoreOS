@@ -17,3 +17,6 @@ lto = false
 
 [profile.dev]
 panic = "abort"
+
+[features]
+kbd_debug = []

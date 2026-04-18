@@ -5,16 +5,8 @@
 use core::sync::atomic::{AtomicBool, Ordering};
 
 // ---------------------------------------------------------------------------
-// I/O helpers
+// I/O
 // ---------------------------------------------------------------------------
-
-#[allow(dead_code)]
-#[inline]
-pub unsafe fn read_status() -> u8 {
-    let status: u8;
-    core::arch::asm!("in al, 0x64", out("al") status, options(nostack, nomem));
-    status
-}
 
 #[inline]
 pub unsafe fn read_data() -> u8 {
@@ -24,11 +16,30 @@ pub unsafe fn read_data() -> u8 {
 }
 
 // ---------------------------------------------------------------------------
-// Keyboard modifier state
+// Key events
 // ---------------------------------------------------------------------------
 
-/// Tracks shift and caps-lock state using atomics — safe to read from
-/// interrupt context without disabling interrupts.
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum KeyEvent {
+    Press(KeyCode),
+    Release(KeyCode),
+}
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum KeyCode {
+    Printable { normal: char, shifted: char },
+    Enter,
+    Backspace,
+    Space,
+    Shift,
+    CapsLock,
+    Unknown,
+}
+
+// ---------------------------------------------------------------------------
+// Keyboard state
+// ---------------------------------------------------------------------------
+
 pub struct KeyboardState {
     shift: AtomicBool,
     caps_lock: AtomicBool,
@@ -46,14 +57,17 @@ impl KeyboardState {
     fn shift(&self) -> bool {
         self.shift.load(Ordering::Relaxed)
     }
+
     #[inline]
     fn caps_lock(&self) -> bool {
         self.caps_lock.load(Ordering::Relaxed)
     }
+
     #[inline]
     fn set_shift(&self, v: bool) {
         self.shift.store(v, Ordering::Relaxed);
     }
+
     #[inline]
     fn toggle_caps(&self) {
         let cur = self.caps_lock.load(Ordering::Relaxed);
@@ -64,142 +78,188 @@ impl KeyboardState {
 pub static KBD_STATE: KeyboardState = KeyboardState::new();
 
 // ---------------------------------------------------------------------------
-// Scancode → char translation
+// Scancode → KeyEvent
 // ---------------------------------------------------------------------------
 
-/// Translate a PS/2 Set-1 scancode into a character.
-/// Returns `'\0'` for non-printable or modifier keys.
-pub fn scancode_to_char(scancode: u8) -> char {
-    let state = &KBD_STATE;
+pub fn decode_scancode(scancode: u8) -> KeyEvent {
+    let release = scancode & 0x80 != 0;
+    let code = scancode & 0x7F;
 
-    match scancode {
-        // Shift press / release
-        0x2A | 0x36 => {
-            state.set_shift(true);
-            '\0'
-        }
-        0xAA | 0xB6 => {
-            state.set_shift(false);
-            '\0'
-        }
+    let key = match code {
+        // modifiers
+        0x2A | 0x36 => KeyCode::Shift,
+        0x3A => KeyCode::CapsLock,
 
-        // Caps Lock toggle
-        0x3A => {
-            state.toggle_caps();
-            '\0'
-        }
+        // control
+        0x1C => KeyCode::Enter,
+        0x0E => KeyCode::Backspace,
+        0x39 => KeyCode::Space,
 
-        // Whitespace / control
-        0x39 => ' ',
-        0x1C => '\n',
-        0x0E => '\x08', // backspace
+        // number row
+        0x02 => KeyCode::Printable {
+            normal: '1',
+            shifted: '!',
+        },
+        0x03 => KeyCode::Printable {
+            normal: '2',
+            shifted: '@',
+        },
+        0x04 => KeyCode::Printable {
+            normal: '3',
+            shifted: '#',
+        },
+        0x05 => KeyCode::Printable {
+            normal: '4',
+            shifted: '$',
+        },
+        0x06 => KeyCode::Printable {
+            normal: '5',
+            shifted: '%',
+        },
+        0x07 => KeyCode::Printable {
+            normal: '6',
+            shifted: '^',
+        },
+        0x08 => KeyCode::Printable {
+            normal: '7',
+            shifted: '&',
+        },
+        0x09 => KeyCode::Printable {
+            normal: '8',
+            shifted: '*',
+        },
+        0x0A => KeyCode::Printable {
+            normal: '9',
+            shifted: '(',
+        },
+        0x0B => KeyCode::Printable {
+            normal: '0',
+            shifted: ')',
+        },
 
-        // Number row (unshifted / shifted)
-        0x02 => {
-            if state.shift() {
-                '!'
-            } else {
-                '1'
-            }
-        }
-        0x03 => {
-            if state.shift() {
-                '@'
-            } else {
-                '2'
-            }
-        }
-        0x04 => {
-            if state.shift() {
-                '#'
-            } else {
-                '3'
-            }
-        }
-        0x05 => {
-            if state.shift() {
-                '$'
-            } else {
-                '4'
-            }
-        }
-        0x06 => {
-            if state.shift() {
-                '%'
-            } else {
-                '5'
-            }
-        }
-        0x07 => {
-            if state.shift() {
-                '^'
-            } else {
-                '6'
-            }
-        }
-        0x08 => {
-            if state.shift() {
-                '&'
-            } else {
-                '7'
-            }
-        }
-        0x09 => {
-            if state.shift() {
-                '*'
-            } else {
-                '8'
-            }
-        }
-        0x0A => {
-            if state.shift() {
-                '('
-            } else {
-                '9'
-            }
-        }
-        0x0B => {
-            if state.shift() {
-                ')'
-            } else {
-                '0'
-            }
-        }
-        0x0C => {
-            if state.shift() {
-                '_'
-            } else {
-                '-'
-            }
-        }
-        0x0D => {
-            if state.shift() {
-                '+'
-            } else {
-                '='
-            }
-        }
+        // symbols
+        0x0C => KeyCode::Printable {
+            normal: '-',
+            shifted: '_',
+        },
+        0x0D => KeyCode::Printable {
+            normal: '=',
+            shifted: '+',
+        },
 
-        // Alpha keys
+        0x1A => KeyCode::Printable {
+            normal: '[',
+            shifted: '{',
+        },
+        0x1B => KeyCode::Printable {
+            normal: ']',
+            shifted: '}',
+        },
+
+        0x27 => KeyCode::Printable {
+            normal: ';',
+            shifted: ':',
+        },
+        0x28 => KeyCode::Printable {
+            normal: '\'',
+            shifted: '"',
+        },
+
+        0x29 => KeyCode::Printable {
+            normal: '`',
+            shifted: '~',
+        },
+
+        0x2B => KeyCode::Printable {
+            normal: '\\',
+            shifted: '|',
+        },
+
+        0x33 => KeyCode::Printable {
+            normal: ',',
+            shifted: '<',
+        },
+        0x34 => KeyCode::Printable {
+            normal: '.',
+            shifted: '>',
+        },
+        0x35 => KeyCode::Printable {
+            normal: '/',
+            shifted: '?',
+        },
+
+        // letters
         sc @ 0x10..=0x32 => {
-            let upper = state.shift() ^ state.caps_lock();
-            alpha_scancode(sc, upper)
+            let c = map_alpha(sc);
+            if c != '\0' {
+                KeyCode::Printable {
+                    normal: c,
+                    shifted: c.to_ascii_uppercase(),
+                }
+            } else {
+                KeyCode::Unknown
+            }
         }
 
-        // Unknown make codes — log to serial
-        sc if sc < 0x80 => {
-            crate::serial_fmt!("[KBD] unmapped scancode: {:#04x}\n", sc);
-            '\0'
-        }
+        _ => KeyCode::Unknown,
+    };
 
-        // Break codes (key release) — silently ignore
-        _ => '\0',
+    let event = if release {
+        KeyEvent::Release(key)
+    } else {
+        KeyEvent::Press(key)
+    };
+
+    apply_state(event);
+    event
+}
+
+// ---------------------------------------------------------------------------
+// State updates
+// ---------------------------------------------------------------------------
+
+fn apply_state(event: KeyEvent) {
+    match event {
+        KeyEvent::Press(KeyCode::Shift) => KBD_STATE.set_shift(true),
+        KeyEvent::Release(KeyCode::Shift) => KBD_STATE.set_shift(false),
+        KeyEvent::Press(KeyCode::CapsLock) => KBD_STATE.toggle_caps(),
+        _ => {}
     }
 }
 
-/// Map an alpha scancode to its character, applying case.
-fn alpha_scancode(sc: u8, upper: bool) -> char {
-    let ch = match sc {
+// ---------------------------------------------------------------------------
+// KeyEvent → char
+// ---------------------------------------------------------------------------
+
+pub fn keyevent_to_char(event: KeyEvent) -> Option<char> {
+    let KeyEvent::Press(key) = event else {
+        return None;
+    };
+
+    match key {
+        KeyCode::Printable { normal, shifted } => {
+            let shift = KBD_STATE.shift();
+
+            if normal.is_ascii_alphabetic() {
+                let upper = shift ^ KBD_STATE.caps_lock();
+                Some(if upper { shifted } else { normal })
+            } else {
+                Some(if shift { shifted } else { normal })
+            }
+        }
+        KeyCode::Enter => Some('\n'),
+        KeyCode::Backspace => Some('\x08'),
+        KeyCode::Space => Some(' '),
+        _ => None,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+fn map_alpha(sc: u8) -> char {
+    match sc {
         0x1E => 'a',
         0x30 => 'b',
         0x2E => 'c',
@@ -226,11 +286,7 @@ fn alpha_scancode(sc: u8, upper: bool) -> char {
         0x2D => 'x',
         0x15 => 'y',
         0x2C => 'z',
-        _ => return '\0',
-    };
-    if upper {
-        (ch as u8 - b'a' + b'A') as char
-    } else {
-        ch
+        _ => '\0',
     }
 }
+
