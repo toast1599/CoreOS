@@ -117,7 +117,7 @@ run-gfx: $(IMAGE)
 # Project Context Dump
 # =========================
 
-CONTEXT_FILE = .project_context.md
+CONTEXT_FILE = ../.project_context.md
 
 context:
 	@echo "Generating project context..."
@@ -135,7 +135,7 @@ context:
 
 	@echo "\n## Source Files" >> $(CONTEXT_FILE)
 
-	@find . \
+	@find .. \
 	-type d \( -name .git -o -name build -o -name target -o -name node_modules -o -name __pycache__ \) -prune -o \
 	-type f \( \
 	-name "*.c" -o \
@@ -148,6 +148,7 @@ context:
 	-name "*.S" -o \
 	-name "*.py" -o \
 	-name "*.go" -o \
+	-name "*.sh" -o \
 	-name "*.js" -o \
 	-name "*.ts" -o \
 	-name "*.java" -o \

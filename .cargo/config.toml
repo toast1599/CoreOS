@@ -6,3 +6,16 @@ rustflags = [
     "-C", "relocation-model=static",
     "-C", "no-redzone=yes",
 ]
+
+[alias]
+# The essentials
+b = "run -p xtask -- build"
+r = "run -p xtask -- run"
+c = "run -p xtask -- clean"
+
+# The granular stuff
+k = "run -p xtask -- build-kernel"
+bb = "run -p xtask -- build-bootloader"
+gs = "run -p xtask -- gen-syscalls"
+u  = "run -p xtask -- user"
+i  = "run -p xtask -- image"

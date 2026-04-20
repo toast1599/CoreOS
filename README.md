@@ -37,11 +37,24 @@ broader compatibility for userspace applications.
 ## Quick Start
 
 ```sh
-make      # Build kernel and create bootable disk image
-make run  # Launch the system in QEMU
+./bootstrap.sh                 # Install and setup dependencies
+cargo run -p xtask -- build    # Build the OS
+cargo run -p xtask -- run      # Boot in QEMU
 ```
 
 This build produces a bootable GPT image at `build/coreos.img`.
+
+## Note
+
+This is NOT a production ready / daily-driver OS (if you couldn't tell already),
+so don't expect standard programs to run **just yet** without major
+modifications to many subsystems.
+
+However, if you would prefer to see standard programs being ran or are just
+interested in the making of this OS, feel free to try to follow the steps above.
+
+If you would like to report a bug in any of the subsystems, feel free to open an
+issue.
 
 ## Repository Layout
 
@@ -53,4 +66,3 @@ kernel/       64-bit Kernel (Rust)
 user/         Userspace programs and libc shim (C)
 tools/        Build and code-generation scripts
 ```
-
