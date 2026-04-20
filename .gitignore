@@ -1,12 +1,15 @@
 # Rust
 kernel/target/
 bootloader/target/
+xtask/target
+target/
 **/*.o
 
 # Build output
 build/
 *.img
 *.bin
+**/*.elf
 BOOTX64.EFI
 
 # Firmware vars

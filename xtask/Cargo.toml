@@ -1,0 +1,10 @@
+[package]
+name = "xtask"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+xshell = "0.2"
+crossterm = "0.27"
+indicatif = "0.17"

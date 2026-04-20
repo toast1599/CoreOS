@@ -90,7 +90,7 @@ static void cmd_help(void) {
   println("  font <+/->    - change font size");
   println("  boottime      - show boot timing");
   println("  clear         - clear terminal");
-  println("  panic         - trigger kernel panic");
+  println("  panic         - trigger pernel kanic");
   println("  reboot        - reboot system");
   println("  exit [code]   - exit the shell");
 }
@@ -160,6 +160,7 @@ static void cmd_echo(const char *args) { println(args); }
 //
 // Better approach: add a sys_ls syscall later. For now, just try "test"
 // and a few other well-known names.
+
 static void cmd_ls(void) {
   char buf[1024];
   long total = sys_ls(buf, sizeof(buf));
@@ -169,7 +170,8 @@ static void cmd_ls(void) {
   }
   sys_write(STDOUT, buf, (size_t)total);
   if (total == 0 || buf[total - 1] != '\n') {
-    puts("\n");
+    puts("");
+    puts("");
   }
 }
 

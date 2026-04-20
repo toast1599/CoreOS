@@ -10,13 +10,5 @@ path = "src/main.rs"
 
 [dependencies]
 
-[profile.release]
-panic = "abort"
-opt-level = 1
-lto = false
-
-[profile.dev]
-panic = "abort"
-
 [features]
 kbd_debug = []
