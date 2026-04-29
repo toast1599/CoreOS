@@ -7,8 +7,9 @@ pub mod scheduler;
 pub mod task;
 mod vm;
 
-use core::sync::atomic::AtomicUsize;
 use crate::syscall::types::{SigAction, SigSet, StackT};
+use core::sync::atomic::AtomicUsize;
+use spin::Mutex; // CRUCIAL
 
 // ---------------------------------------------------------------------------
 // File descriptor table
@@ -63,6 +64,9 @@ impl OpenFile {
 pub enum FdTarget {
     Empty,
     Stdio(u8),
+    Tty,
+    Null,
+    Zero,
     Open(usize),
     PipeRead(usize),
     PipeWrite(usize),
@@ -71,6 +75,7 @@ pub enum FdTarget {
 #[derive(Clone, Copy)]
 pub enum DescriptorInfo {
     Stdio { index: u8 },
+    CharDevice,
     File { file_idx: usize, size: usize },
     Pipe,
 }
@@ -206,7 +211,9 @@ static NEXT_PID: AtomicUsize = AtomicUsize::new(1);
 /// The process table. Indexed by task slot (matching Task array in task.rs).
 pub static mut PROCESSES: [Option<Process>; 8] = [None, None, None, None, None, None, None, None];
 pub static mut THREADS: [Option<Thread>; 8] = [None, None, None, None, None, None, None, None];
-static mut OPEN_FILES: [OpenFile; MAX_OPEN_FILES] = [OpenFile::empty(); MAX_OPEN_FILES];
+
+static OPEN_FILES: Mutex<[OpenFile; MAX_OPEN_FILES]> =
+    Mutex::new([OpenFile::empty(); MAX_OPEN_FILES]);
 static mut PIPES: [Pipe; MAX_PIPES] = [Pipe::empty(); MAX_PIPES];
 
 fn default_fds() -> [FdTarget; MAX_FDS] {
@@ -226,16 +233,16 @@ fn default_fd_flags() -> [u32; MAX_FDS] {
 // ---------------------------------------------------------------------------
 
 pub use fd::{
-    close_descriptor, create_pipe_pair, dup_exact, dup_min, fork_current,
-    get_fd_flags, get_fd_mut, get_status_flags, is_stdin, is_stdout_or_stderr, open_file, read_file,
-    read_pipe, reap_slot, seek, set_cloexec, set_status_flags, write_file, write_pipe,
+    close_descriptor, create_pipe_pair, dup_exact, dup_min, fork_current, get_fd_flags,
+    get_fd_target, get_status_flags, is_stdin, is_stdout_or_stderr, open_char_device, open_file,
+    read_file, read_pipe, reap_slot, seek, set_cloexec, set_status_flags, with_fd_mut, write_file,
+    write_pipe,
 };
 pub use fd::{descriptor_info, file_size};
 pub use process::{
-    current_brk, current_pid, current_ppid, current_process, current_process_mut, current_thread,
-    current_thread_mut, current_tid, exit, exit_thread, spawn_thread_in_group,
-    find_slot_by_pid, is_running_in_slot, set_brk, spawn_named, active_process_count,
-    task_slot_reaped, find_thread_slot_by_tid,
-    current_fs_base, current_exe_path,
+    active_process_count, current_brk, current_exe_path, current_fs_base, current_pid,
+    current_ppid, current_process, current_process_mut, current_thread, current_thread_mut,
+    current_tid, exit, exit_thread, find_slot_by_pid, find_thread_slot_by_tid, is_running_in_slot,
+    set_brk, spawn_named, spawn_thread_in_group, task_slot_reaped,
 };
 pub use vm::{alloc_vma, find_vma_exact_mut, region_conflicts, reserve_mmap_base};

@@ -54,7 +54,7 @@ pub fn tick() {
     let t = crate::hw::pit::ticks();
 
     // switch every 10 ticks
-    if t % 10 == 0 {
+    if t.is_multiple_of(10) {
         unsafe {
             try_switch();
         }

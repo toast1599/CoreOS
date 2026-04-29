@@ -4,8 +4,8 @@ mod fd_open;
 mod fd_pipe;
 
 use super::{
-    DescriptorInfo, FdTarget, OpenFile, Process, MAX_FDS, MAX_OPEN_FILES, MAX_PIPES,
-    OPEN_FILES, PIPES, PROCESSES, THREADS, FD_CLOEXEC,
+    DescriptorInfo, FdTarget, OpenFile, Process, FD_CLOEXEC, MAX_FDS, MAX_OPEN_FILES, MAX_PIPES,
+    OPEN_FILES, PIPES, PROCESSES, THREADS,
 };
 use crate::syscall::types::{SigSet, StackT};
 
@@ -16,7 +16,7 @@ unsafe fn alloc_open_file_with_flags(file_idx: usize, status_flags: u32) -> Opti
 unsafe fn retain_fd_target(target: FdTarget) -> bool {
     match target {
         FdTarget::Empty => false,
-        FdTarget::Stdio(_) => true,
+        FdTarget::Stdio(_) | FdTarget::Tty | FdTarget::Null | FdTarget::Zero => true,
         FdTarget::Open(open_idx) => fd_open::retain(open_idx),
         FdTarget::PipeRead(pipe_idx) => fd_pipe::retain_read(pipe_idx),
         FdTarget::PipeWrite(pipe_idx) => fd_pipe::retain_write(pipe_idx),
@@ -45,20 +45,19 @@ pub unsafe fn fork_current(task_slot: usize, pml4: usize) -> usize {
     let fds = parent.fds;
     for target in fds {
         match target {
-            FdTarget::Open(open_idx) => {
-                if open_idx < MAX_OPEN_FILES && OPEN_FILES[open_idx].in_use {
-                    OPEN_FILES[open_idx].refs += 1;
+            FdTarget::Open(open_idx) if open_idx < MAX_OPEN_FILES => {
+                let mut files = OPEN_FILES.lock();
+                if files[open_idx].in_use {
+                    files[open_idx].refs += 1;
                 }
+                let mut files = OPEN_FILES.lock();
+                files[open_idx].refs += 1;
             }
-            FdTarget::PipeRead(pipe_idx) => {
-                if pipe_idx < MAX_PIPES && PIPES[pipe_idx].in_use {
-                    PIPES[pipe_idx].read_refs += 1;
-                }
+            FdTarget::PipeRead(pipe_idx) if pipe_idx < MAX_PIPES && PIPES[pipe_idx].in_use => {
+                PIPES[pipe_idx].read_refs += 1;
             }
-            FdTarget::PipeWrite(pipe_idx) => {
-                if pipe_idx < MAX_PIPES && PIPES[pipe_idx].in_use {
-                    PIPES[pipe_idx].write_refs += 1;
-                }
+            FdTarget::PipeWrite(pipe_idx) if pipe_idx < MAX_PIPES && PIPES[pipe_idx].in_use => {
+                PIPES[pipe_idx].write_refs += 1;
             }
             _ => {}
         }
@@ -125,7 +124,11 @@ pub unsafe fn reap_slot(slot: usize) -> Option<i64> {
 
 pub unsafe fn open_file(file_idx: usize, status_flags: u32) -> Option<usize> {
     let fd = alloc_fd_with_flags(file_idx, status_flags);
-    if fd < 0 { None } else { Some(fd as usize) }
+    if fd < 0 {
+        None
+    } else {
+        Some(fd as usize)
+    }
 }
 
 unsafe fn alloc_fd_with_flags(file_idx: usize, status_flags: u32) -> i64 {
@@ -162,15 +165,16 @@ pub unsafe fn get_fd_target(fd: usize) -> Option<FdTarget> {
 pub unsafe fn descriptor_info(fd: usize) -> Option<DescriptorInfo> {
     match get_fd_target(fd)? {
         FdTarget::Stdio(index) => Some(DescriptorInfo::Stdio { index }),
+        FdTarget::Tty | FdTarget::Null | FdTarget::Zero => Some(DescriptorInfo::CharDevice),
         FdTarget::Open(open_idx) => fd_open::descriptor_info(open_idx),
         FdTarget::PipeRead(_) | FdTarget::PipeWrite(_) => Some(DescriptorInfo::Pipe),
         _ => None,
     }
 }
 
-pub unsafe fn get_fd_mut(fd: usize) -> Option<&'static mut OpenFile> {
+pub unsafe fn with_fd_mut<R>(fd: usize, f: impl FnOnce(&mut OpenFile) -> R) -> Option<R> {
     match get_fd_target(fd)? {
-        FdTarget::Open(open_idx) => fd_open::get_mut(open_idx),
+        FdTarget::Open(open_idx) => fd_open::with_mut(open_idx, f),
         _ => None,
     }
 }
@@ -248,12 +252,20 @@ pub unsafe fn dup_fd(old_fd: usize, min_fd: usize, new_fd: Option<usize>, cloexe
 
 pub unsafe fn dup_min(old_fd: usize, min_fd: usize, cloexec: bool) -> Option<usize> {
     let fd = dup_fd(old_fd, min_fd, None, cloexec);
-    if fd < 0 { None } else { Some(fd as usize) }
+    if fd < 0 {
+        None
+    } else {
+        Some(fd as usize)
+    }
 }
 
 pub unsafe fn dup_exact(old_fd: usize, new_fd: usize, cloexec: bool) -> Option<usize> {
     let fd = dup_fd(old_fd, 0, Some(new_fd), cloexec);
-    if fd < 0 { None } else { Some(fd as usize) }
+    if fd < 0 {
+        None
+    } else {
+        Some(fd as usize)
+    }
 }
 
 pub unsafe fn get_fd_flags(fd: usize) -> Option<u32> {
@@ -283,7 +295,7 @@ pub unsafe fn set_cloexec(fd: usize, cloexec: bool) -> bool {
 
 pub unsafe fn get_status_flags(fd: usize) -> Option<u32> {
     match get_fd_target(fd)? {
-        FdTarget::Stdio(_) => Some(0),
+        FdTarget::Stdio(_) | FdTarget::Tty | FdTarget::Null | FdTarget::Zero => Some(0),
         FdTarget::Open(open_idx) => fd_open::status_flags(open_idx),
         FdTarget::PipeRead(_) | FdTarget::PipeWrite(_) => fd_pipe::status_flags(fd),
         _ => None,
@@ -298,7 +310,10 @@ pub unsafe fn file_size(fd: usize) -> Option<usize> {
 }
 
 pub unsafe fn is_stdin(fd: usize) -> bool {
-    matches!(descriptor_info(fd), Some(DescriptorInfo::Stdio { index: 0 }))
+    matches!(
+        descriptor_info(fd),
+        Some(DescriptorInfo::Stdio { index: 0 })
+    )
 }
 
 pub unsafe fn is_stdout_or_stderr(fd: usize) -> bool {
@@ -313,27 +328,31 @@ pub unsafe fn seek(fd: usize, offset: i64, whence: u64) -> Option<u64> {
     const SEEK_CUR: u64 = 1;
     const SEEK_END: u64 = 2;
 
-    let of = get_fd_mut(fd)?;
-    let file_size = crate::syscall::fs::fs_file_size(of.file_idx) as i64;
-    let cur = of.offset as i64;
+    with_fd_mut(fd, |of| {
+        let file_size = crate::syscall::fs::fs_file_size(of.file_idx) as i64;
+        let cur = of.offset as i64;
 
-    let new_off = match whence {
-        SEEK_SET => offset,
-        SEEK_CUR => cur.saturating_add(offset),
-        SEEK_END => file_size.saturating_add(offset),
-        _ => return None,
-    };
-    if new_off < 0 {
-        return None;
-    }
+        let new_off = match whence {
+            SEEK_SET => offset,
+            SEEK_CUR => cur.saturating_add(offset),
+            SEEK_END => file_size.saturating_add(offset),
+            _ => return None,
+        };
 
-    of.offset = new_off as usize;
-    Some(new_off as u64)
+        if new_off < 0 {
+            return None;
+        }
+
+        of.offset = new_off as usize;
+        Some(new_off as u64)
+    })?
 }
-
 pub unsafe fn set_status_flags(fd: usize, flags: u32) -> bool {
     match get_fd_target(fd) {
-        Some(FdTarget::Stdio(_)) => true,
+        Some(FdTarget::Stdio(_) | FdTarget::Tty | FdTarget::Null | FdTarget::Zero) => {
+            let _ = flags;
+            true
+        }
         Some(FdTarget::Open(open_idx)) => fd_open::set_status_flags(open_idx, flags),
         Some(FdTarget::PipeRead(_)) | Some(FdTarget::PipeWrite(_)) => {
             fd_pipe::set_status_flags(fd, flags)
@@ -343,37 +362,41 @@ pub unsafe fn set_status_flags(fd: usize, flags: u32) -> bool {
 }
 
 pub unsafe fn read_file(fd: usize, buf: *mut u8, count: usize) -> Option<usize> {
-    let of = get_fd_mut(fd)?;
-    if (of.status_flags & super::O_ACCMODE) == super::O_WRONLY {
-        return None;
-    }
-    let bytes_read = crate::syscall::fs::fs_read(of.file_idx, of.offset, buf, count);
-    of.offset += bytes_read;
-    Some(bytes_read)
-}
+    with_fd_mut(fd, |of| {
+        if (of.status_flags & super::O_ACCMODE) == super::O_WRONLY {
+            return None;
+        }
 
+        let bytes_read = crate::syscall::fs::fs_read(of.file_idx, of.offset, buf, count);
+
+        of.offset += bytes_read;
+        Some(bytes_read)
+    })?
+}
 pub unsafe fn write_file(fd: usize, buf: *const u8, len: usize) -> Option<usize> {
-    let of = get_fd_mut(fd)?;
-    match of.status_flags & super::O_ACCMODE {
-        super::O_RDONLY => return None,
-        super::O_WRONLY | super::O_RDWR => {}
-        _ => return None,
-    }
+    with_fd_mut(fd, |of| {
+        match of.status_flags & super::O_ACCMODE {
+            super::O_RDONLY => return None,
+            super::O_WRONLY | super::O_RDWR => {}
+            _ => return None,
+        }
 
-    let offset = if (of.status_flags & super::O_APPEND) != 0 {
-        crate::syscall::fs::fs_file_size(of.file_idx)
-    } else {
-        of.offset
-    };
+        let offset = if (of.status_flags & super::O_APPEND) != 0 {
+            crate::syscall::fs::fs_file_size(of.file_idx)
+        } else {
+            of.offset
+        };
 
-    let bytes = core::slice::from_raw_parts(buf, len);
-    if !crate::syscall::fs::fs_write_at(of.file_idx, offset, bytes) {
-        return None;
-    }
-    of.offset = offset + len;
-    Some(len)
+        let bytes = core::slice::from_raw_parts(buf, len);
+
+        if !crate::syscall::fs::fs_write_at(of.file_idx, offset, bytes) {
+            return None;
+        }
+
+        of.offset = offset + len;
+        Some(len)
+    })?
 }
-
 pub unsafe fn write_pipe(fd: usize, buf: *const u8, len: usize) -> Option<usize> {
     fd_pipe::write(fd, buf, len)
 }
@@ -416,4 +439,18 @@ pub unsafe fn alloc_pipe() -> Option<(usize, usize)> {
 
 pub unsafe fn create_pipe_pair() -> Option<(usize, usize)> {
     alloc_pipe()
+}
+
+pub unsafe fn open_char_device(target: FdTarget) -> Option<usize> {
+    match target {
+        FdTarget::Tty | FdTarget::Null | FdTarget::Zero => {
+            let fd = alloc_specific_fd(target, 0);
+            if fd < 0 {
+                None
+            } else {
+                Some(fd as usize)
+            }
+        }
+        _ => None,
+    }
 }

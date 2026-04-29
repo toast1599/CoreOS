@@ -26,6 +26,14 @@ pub enum ElfError {
     OomLoadingSegment,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct LoadedImage {
+    pub entry: u64,
+    pub phdr: u64,
+    pub phent: u64,
+    pub phnum: u64,
+}
+
 // ---------------------------------------------------------------------------
 // ELF64 header (only the fields we need)
 // ---------------------------------------------------------------------------
@@ -111,7 +119,7 @@ const PH_MEMSZ: usize = 40;
 ///
 /// Returns the entry point virtual address on success.
 ///
-pub unsafe fn load_into(pml4: usize, data: &[u8]) -> Result<u64, ElfError> {
+pub unsafe fn load_into(pml4: usize, data: &[u8]) -> Result<LoadedImage, ElfError> {
     // -----------------------------------------------------------------------
     // 1. Validate header
     // -----------------------------------------------------------------------
@@ -159,6 +167,8 @@ pub unsafe fn load_into(pml4: usize, data: &[u8]) -> Result<u64, ElfError> {
         phnum
     );
 
+    let mut phdr_vaddr = 0u64;
+
     // -----------------------------------------------------------------------
     // 2. Walk PT_LOAD segments
     // -----------------------------------------------------------------------
@@ -185,6 +195,10 @@ pub unsafe fn load_into(pml4: usize, data: &[u8]) -> Result<u64, ElfError> {
             .is_none_or(|end| end > data.len())
         {
             return Err(ElfError::TooSmall);
+        }
+
+        if phdr_vaddr == 0 && p_offset <= phoff && phoff < p_offset + p_filesz {
+            phdr_vaddr = (p_vaddr + (phoff - p_offset)) as u64;
         }
 
         crate::dbg_log!(
@@ -262,5 +276,10 @@ pub unsafe fn load_into(pml4: usize, data: &[u8]) -> Result<u64, ElfError> {
         );
     }
 
-    Ok(entry)
+    Ok(LoadedImage {
+        entry,
+        phdr: phdr_vaddr,
+        phent: phentsize as u64,
+        phnum: phnum as u64,
+    })
 }

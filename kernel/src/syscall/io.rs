@@ -21,11 +21,14 @@ pub unsafe fn write(_fd: u64, buf_ptr: u64, count: u64) -> u64 {
 
 unsafe fn write_impl(fd: u64, buf_ptr: u64, count: u64) -> SysResult {
     let len = count as usize;
-    result::ensure(crate::usercopy::user_range_ok(buf_ptr, len), SysError::Fault)?;
-    result::ok(
-        result::option(write_to_fd(fd as usize, buf_ptr as *const u8, len), SysError::BadFd)?
-            as u64,
-    )
+    result::ensure(
+        crate::usercopy::user_range_ok(buf_ptr, len),
+        SysError::Fault,
+    )?;
+    result::ok(result::option(
+        write_to_fd(fd as usize, buf_ptr as *const u8, len),
+        SysError::BadFd,
+    )? as u64)
 }
 
 pub unsafe fn read(fd: u64, buf_ptr: u64, count: u64) -> u64 {
@@ -34,11 +37,14 @@ pub unsafe fn read(fd: u64, buf_ptr: u64, count: u64) -> u64 {
 
 unsafe fn read_impl(fd: u64, buf_ptr: u64, count: u64) -> SysResult {
     let count = count as usize;
-    result::ensure(crate::usercopy::user_range_ok(buf_ptr, count), SysError::Fault)?;
-    result::ok(
-        result::option(read_from_fd(fd as usize, buf_ptr as *mut u8, count), SysError::BadFd)?
-            as u64,
-    )
+    result::ensure(
+        crate::usercopy::user_range_ok(buf_ptr, count),
+        SysError::Fault,
+    )?;
+    result::ok(result::option(
+        read_from_fd(fd as usize, buf_ptr as *mut u8, count),
+        SysError::BadFd,
+    )? as u64)
 }
 
 pub unsafe fn writev(fd: u64, iov_ptr: u64, iovcnt: u64) -> u64 {
@@ -46,13 +52,18 @@ pub unsafe fn writev(fd: u64, iov_ptr: u64, iovcnt: u64) -> u64 {
 }
 
 unsafe fn writev_impl(fd: u64, iov_ptr: u64, iovcnt: u64) -> SysResult {
-    let (iovs, count) =
-        result::option(helpers::copy_iovecs_from_user(iov_ptr, iovcnt), SysError::Fault)?;
+    let (iovs, count) = result::option(
+        helpers::copy_iovecs_from_user(iov_ptr, iovcnt),
+        SysError::Fault,
+    )?;
 
     let mut total = 0usize;
     for iov in &iovs[..count] {
         let len = iov.iov_len as usize;
-        result::ensure(crate::usercopy::user_range_ok(iov.iov_base, len), SysError::Fault)?;
+        result::ensure(
+            crate::usercopy::user_range_ok(iov.iov_base, len),
+            SysError::Fault,
+        )?;
         match write_to_fd(fd as usize, iov.iov_base as *const u8, len) {
             Some(written) => {
                 total = total.saturating_add(written);
@@ -71,13 +82,18 @@ pub unsafe fn readv(fd: u64, iov_ptr: u64, iovcnt: u64) -> u64 {
 }
 
 unsafe fn readv_impl(fd: u64, iov_ptr: u64, iovcnt: u64) -> SysResult {
-    let (iovs, count) =
-        result::option(helpers::copy_iovecs_from_user(iov_ptr, iovcnt), SysError::Fault)?;
+    let (iovs, count) = result::option(
+        helpers::copy_iovecs_from_user(iov_ptr, iovcnt),
+        SysError::Fault,
+    )?;
 
     let mut total = 0usize;
     for iov in &iovs[..count] {
         let len = iov.iov_len as usize;
-        result::ensure(crate::usercopy::user_range_ok(iov.iov_base, len), SysError::Fault)?;
+        result::ensure(
+            crate::usercopy::user_range_ok(iov.iov_base, len),
+            SysError::Fault,
+        )?;
         match read_from_fd(fd as usize, iov.iov_base as *mut u8, len) {
             Some(read) => {
                 total = total.saturating_add(read);
@@ -151,7 +167,10 @@ pub unsafe fn pread64(fd: u64, buf_ptr: u64, count: u64, offset: u64) -> u64 {
 
 unsafe fn pread64_impl(fd: u64, buf_ptr: u64, count: u64, offset: u64) -> SysResult {
     let len = count as usize;
-    result::ensure(crate::usercopy::user_range_ok(buf_ptr, len), SysError::Fault)?;
+    result::ensure(
+        crate::usercopy::user_range_ok(buf_ptr, len),
+        SysError::Fault,
+    )?;
     let status = result::option(crate::proc::get_status_flags(fd as usize), SysError::BadFd)?;
     result::ensure((status & O_ACCMODE) != O_WRONLY, SysError::BadFd)?;
     let DescriptorInfo::File { file_idx, .. } =
@@ -160,8 +179,14 @@ unsafe fn pread64_impl(fd: u64, buf_ptr: u64, count: u64, offset: u64) -> SysRes
         return result::err(SysError::NotSeekable);
     };
 
-    let bytes = result::option(crate::syscall::fs::fs_read_to_vec(file_idx, offset as usize, len), SysError::BadFd)?;
-    result::ensure(crate::usercopy::copy_to_user(buf_ptr, bytes.as_slice()).is_ok(), SysError::Fault)?;
+    let bytes = result::option(
+        crate::syscall::fs::fs_read_to_vec(file_idx, offset as usize, len),
+        SysError::BadFd,
+    )?;
+    result::ensure(
+        crate::usercopy::copy_to_user(buf_ptr, bytes.as_slice()).is_ok(),
+        SysError::Fault,
+    )?;
     result::ok(bytes.len() as u64)
 }
 
@@ -171,7 +196,10 @@ pub unsafe fn pwrite64(fd: u64, buf_ptr: u64, count: u64, offset: u64) -> u64 {
 
 unsafe fn pwrite64_impl(fd: u64, buf_ptr: u64, count: u64, offset: u64) -> SysResult {
     let len = count as usize;
-    result::ensure(crate::usercopy::user_range_ok(buf_ptr, len), SysError::Fault)?;
+    result::ensure(
+        crate::usercopy::user_range_ok(buf_ptr, len),
+        SysError::Fault,
+    )?;
     let status = result::option(crate::proc::get_status_flags(fd as usize), SysError::BadFd)?;
     result::ensure((status & O_ACCMODE) != O_RDONLY, SysError::BadFd)?;
     let DescriptorInfo::File { file_idx, .. } =
@@ -181,8 +209,14 @@ unsafe fn pwrite64_impl(fd: u64, buf_ptr: u64, count: u64, offset: u64) -> SysRe
     };
 
     let mut bytes = alloc::vec![0u8; len];
-    result::ensure(crate::usercopy::copy_from_user(&mut bytes, buf_ptr).is_ok(), SysError::Fault)?;
-    result::ensure(crate::syscall::fs::fs_write_at(file_idx, offset as usize, bytes.as_slice()), SysError::BadFd)?;
+    result::ensure(
+        crate::usercopy::copy_from_user(&mut bytes, buf_ptr).is_ok(),
+        SysError::Fault,
+    )?;
+    result::ensure(
+        crate::syscall::fs::fs_write_at(file_idx, offset as usize, bytes.as_slice()),
+        SysError::BadFd,
+    )?;
     result::ok(len as u64)
 }
 
@@ -191,13 +225,18 @@ pub unsafe fn preadv(fd: u64, iov_ptr: u64, iovcnt: u64, offset: u64) -> u64 {
 }
 
 unsafe fn preadv_impl(fd: u64, iov_ptr: u64, iovcnt: u64, offset: u64) -> SysResult {
-    let (iovs, count) =
-        result::option(helpers::copy_iovecs_from_user(iov_ptr, iovcnt), SysError::Fault)?;
+    let (iovs, count) = result::option(
+        helpers::copy_iovecs_from_user(iov_ptr, iovcnt),
+        SysError::Fault,
+    )?;
     let mut total = 0usize;
     let mut cur_off = offset;
     for iov in &iovs[..count] {
         let len = iov.iov_len as usize;
-        result::ensure(crate::usercopy::user_range_ok(iov.iov_base, len), SysError::Fault)?;
+        result::ensure(
+            crate::usercopy::user_range_ok(iov.iov_base, len),
+            SysError::Fault,
+        )?;
         let bytes = pread64_impl(fd, iov.iov_base, iov.iov_len, cur_off)? as usize;
         total = total.saturating_add(bytes);
         cur_off = cur_off.saturating_add(bytes as u64);
@@ -213,8 +252,10 @@ pub unsafe fn pwritev(fd: u64, iov_ptr: u64, iovcnt: u64, offset: u64) -> u64 {
 }
 
 unsafe fn pwritev_impl(fd: u64, iov_ptr: u64, iovcnt: u64, offset: u64) -> SysResult {
-    let (iovs, count) =
-        result::option(helpers::copy_iovecs_from_user(iov_ptr, iovcnt), SysError::Fault)?;
+    let (iovs, count) = result::option(
+        helpers::copy_iovecs_from_user(iov_ptr, iovcnt),
+        SysError::Fault,
+    )?;
     let mut total = 0usize;
     let mut cur_off = offset;
     for iov in &iovs[..count] {
@@ -235,32 +276,53 @@ pub unsafe fn sendfile(out_fd: u64, in_fd: u64, offset_ptr: u64, count: u64) -> 
 
 unsafe fn sendfile_impl(out_fd: u64, in_fd: u64, offset_ptr: u64, count: u64) -> SysResult {
     let count = count as usize;
-    let status = result::option(crate::proc::get_status_flags(in_fd as usize), SysError::BadFd)?;
+    let status = result::option(
+        crate::proc::get_status_flags(in_fd as usize),
+        SysError::BadFd,
+    )?;
     result::ensure((status & O_ACCMODE) != O_WRONLY, SysError::BadFd)?;
-    let DescriptorInfo::File { file_idx, .. } =
-        result::option(crate::proc::descriptor_info(in_fd as usize), SysError::BadFd)?
+    let DescriptorInfo::File { file_idx, .. } = result::option(
+        crate::proc::descriptor_info(in_fd as usize),
+        SysError::BadFd,
+    )?
     else {
         return result::err(SysError::NotSeekable);
     };
 
     let start_offset = if offset_ptr != 0 {
-        let offset: i64 = result::option(helpers::copy_struct_from_user(offset_ptr), SysError::Fault)?;
+        let offset: i64 =
+            result::option(helpers::copy_struct_from_user(offset_ptr), SysError::Fault)?;
         result::ensure(offset >= 0, SysError::Invalid)?;
         offset as usize
     } else {
-        let of = result::option(crate::proc::get_fd_mut(in_fd as usize), SysError::BadFd)?;
-        of.offset
+        result::option(
+            crate::proc::with_fd_mut(in_fd as usize, |of| of.offset),
+            SysError::BadFd,
+        )?
     };
 
-    let bytes = result::option(crate::syscall::fs::fs_read_to_vec(file_idx, start_offset, count), SysError::BadFd)?;
-    let written = result::option(write_to_fd(out_fd as usize, bytes.as_ptr(), bytes.len()), SysError::BadFd)?;
+    let bytes = result::option(
+        crate::syscall::fs::fs_read_to_vec(file_idx, start_offset, count),
+        SysError::BadFd,
+    )?;
+    let written = result::option(
+        write_to_fd(out_fd as usize, bytes.as_ptr(), bytes.len()),
+        SysError::BadFd,
+    )?;
 
     if offset_ptr != 0 {
         let new_offset = (start_offset + written) as i64;
-        result::ensure(helpers::copy_struct_to_user(offset_ptr, &new_offset), SysError::Fault)?;
+        result::ensure(
+            helpers::copy_struct_to_user(offset_ptr, &new_offset),
+            SysError::Fault,
+        )?;
     } else {
-        let of = result::option(crate::proc::get_fd_mut(in_fd as usize), SysError::BadFd)?;
-        of.offset = start_offset + written;
+        result::option(
+            crate::proc::with_fd_mut(in_fd as usize, |of| {
+                of.offset = start_offset + written;
+            }),
+            SysError::BadFd,
+        )?;
     }
 
     result::ok(written as u64)
