@@ -15,7 +15,7 @@ pub fn validate_mmap(boot_info: &CoreOS_BootInfo) {
         let size = entry.num_pages * 4096;
 
         // 1. Alignment check
-        if start % 4096 != 0 {
+        if !start.is_multiple_of(4096) {
             panic!("Unaligned region at {:#x}", start);
         }
 

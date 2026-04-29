@@ -168,6 +168,15 @@ fn build_image(sh: &Shell) -> Result<()> {
     )
     .quiet()
     .run()?;
+    cmd!(
+        sh,
+        "mcopy -i {image} user/musl_stage1_test.elf ::/musl_stage1_test.elf"
+    )
+    .quiet()
+    .run()?;
+    cmd!(sh, "mcopy -i {image} user/musl_hello.elf ::/musl_hello.elf")
+        .quiet()
+        .run()?;
 
     // Assets
     cmd!(sh, "mcopy -i {image} assets/font.psfu ::/")

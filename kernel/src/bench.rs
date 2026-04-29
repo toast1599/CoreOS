@@ -153,11 +153,7 @@ pub fn report() -> alloc::string::String {
             p
         };
 
-        let delta = if stamps[i] >= prev {
-            stamps[i] - prev
-        } else {
-            0
-        };
+        let delta = stamps[i].saturating_sub(prev);
         let label = match i {
             0 => Phase::KernelEntry.label(),
             1 => Phase::PmmDone.label(),

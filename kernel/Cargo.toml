@@ -9,6 +9,7 @@ test = false
 path = "src/main.rs" 
 
 [dependencies]
+spin = "0.10.0"
 
 [features]
 kbd_debug = []

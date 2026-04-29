@@ -205,7 +205,7 @@ fn cmd_sleep(buf: &[char; BUF_LEN]) -> ShellOutput {
     let arg = get_arg(buf, 5);
     let mut n: u64 = 0;
     for &c in arg {
-        if c >= '0' && c <= '9' {
+        if c.is_ascii_digit() {
             n = n * 10 + (c as u64 - '0' as u64);
         }
     }
@@ -215,16 +215,14 @@ fn cmd_sleep(buf: &[char; BUF_LEN]) -> ShellOutput {
 
 fn cmd_font(buf: &[char; BUF_LEN], ctx: &mut ShellContext) -> ShellOutput {
     match buf[5] {
-        '+' => {
-            if *ctx.global_scale < 4 {
+        '+'
+            if *ctx.global_scale < 4 => {
                 *ctx.global_scale += 1;
             }
-        }
-        '-' => {
-            if *ctx.global_scale > 1 {
+        '-'
+            if *ctx.global_scale > 1 => {
                 *ctx.global_scale -= 1;
             }
-        }
         _ => {}
     }
     ShellOutput::None
@@ -257,7 +255,7 @@ fn cmd_boottime() -> ShellOutput {
     ShellOutput::PrintLines(
         crate::bench::report()
             .lines()
-            .map(|l| alloc::string::String::from(l))
+            .map(alloc::string::String::from)
             .collect(),
     )
 }

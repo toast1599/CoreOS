@@ -26,9 +26,79 @@ const O_EXCL: u64 = proc::O_EXCL as u64;
 const O_TRUNC: u64 = proc::O_TRUNC as u64;
 const O_APPEND: u64 = proc::O_APPEND as u64;
 const O_NONBLOCK: u64 = proc::O_NONBLOCK as u64;
+const O_LARGEFILE: u64 = 0o100000;
+const DEV_NULL: &[u8] = b"/dev/null";
+const DEV_ZERO: &[u8] = b"/dev/zero";
+const DEV_TTY: &[u8] = b"/dev/tty";
+const DEV_STDIN: &[u8] = b"/dev/stdin";
+const DEV_STDOUT: &[u8] = b"/dev/stdout";
+const DEV_STDERR: &[u8] = b"/dev/stderr";
+
+fn char_stat() -> Stat {
+    Stat {
+        st_dev: 3,
+        st_ino: 1,
+        st_mode: DEFAULT_CHAR_MODE,
+        st_nlink: 1,
+        st_uid: 0,
+        st_gid: 0,
+        st_rdev: 0,
+        st_size: 0,
+        st_blksize: 1,
+        st_blocks: 0,
+        st_atime: 0,
+        st_mtime: 0,
+        st_ctime: 0,
+    }
+}
+
+unsafe fn open_special_path(raw_path: &[u8], flags: u64) -> Option<SysResult> {
+    if !valid_open_flags(flags) {
+        return Some(result::err(SysError::Invalid));
+    }
+    match raw_path {
+        DEV_NULL => Some(match proc::open_char_device(proc::FdTarget::Null) {
+            Some(fd) => result::ok(fd as u64),
+            None => result::err(SysError::BadFd),
+        }),
+        DEV_ZERO => Some(match proc::open_char_device(proc::FdTarget::Zero) {
+            Some(fd) => result::ok(fd as u64),
+            None => result::err(SysError::BadFd),
+        }),
+        DEV_TTY => Some(match proc::open_char_device(proc::FdTarget::Tty) {
+            Some(fd) => result::ok(fd as u64),
+            None => result::err(SysError::BadFd),
+        }),
+        DEV_STDIN => Some(match proc::dup_min(0, 3, false) {
+            Some(fd) => result::ok(fd as u64),
+            None => result::err(SysError::BadFd),
+        }),
+        DEV_STDOUT => Some(match proc::dup_min(1, 3, false) {
+            Some(fd) => result::ok(fd as u64),
+            None => result::err(SysError::BadFd),
+        }),
+        DEV_STDERR => Some(match proc::dup_min(2, 3, false) {
+            Some(fd) => result::ok(fd as u64),
+            None => result::err(SysError::BadFd),
+        }),
+        PROC_SELF_EXE => {
+            let (exe_path, exe_len) = crate::proc::current_exe_path();
+            if exe_len == 0 {
+                return Some(result::err(SysError::NoEntry));
+            }
+            let mut name = ['\0'; helpers::MAX_PATH_LEN];
+            for (dst, src) in name.iter_mut().zip(exe_path.iter()).take(exe_len) {
+                *dst = *src as char;
+            }
+            Some(open_path(&name[..exe_len], flags))
+        }
+        _ => None,
+    }
+}
 
 fn valid_open_flags(flags: u64) -> bool {
-    let allowed = O_ACCMODE | O_CREAT | O_EXCL | O_TRUNC | O_APPEND | O_NONBLOCK | 0o2000000;
+    let allowed =
+        O_ACCMODE | O_CREAT | O_EXCL | O_TRUNC | O_APPEND | O_NONBLOCK | O_LARGEFILE | 0o2000000;
     (flags & !allowed) == 0
 }
 
@@ -89,6 +159,10 @@ pub unsafe fn open(path_ptr: u64, flags: u64, mode: u64) -> u64 {
 }
 
 unsafe fn open_impl(path_ptr: u64, flags: u64, _mode: u64) -> SysResult {
+    let (raw_path, raw_len) = result::option(helpers::copy_cstr_from_user(path_ptr), SysError::Fault)?;
+    if let Some(special) = open_special_path(&raw_path[..raw_len], flags) {
+        return special;
+    }
     let (name_buf, name_len) =
         result::option(helpers::copy_path_cstr_from_user(path_ptr), SysError::Fault)?;
     open_path(&name_buf[..name_len], flags)
@@ -156,6 +230,7 @@ unsafe fn fstat_impl(fd: u64, stat_ptr: u64) -> SysResult {
             st_mtime: 0,
             st_ctime: 0,
         },
+        DescriptorInfo::CharDevice => char_stat(),
         DescriptorInfo::File { file_idx, size } => stat_for_file_idx(file_idx, size as i64),
         DescriptorInfo::Pipe => Stat {
             st_dev: 2,
@@ -185,6 +260,26 @@ pub unsafe fn fstatat(dirfd: u64, path_ptr: u64, stat_ptr: u64, flags: u64) -> u
 unsafe fn fstatat_impl(dirfd: u64, path_ptr: u64, stat_ptr: u64, flags: u64) -> SysResult {
     result::ensure(dirfd as i64 == AT_FDCWD, SysError::Unsupported)?;
     result::ensure(flags == 0, SysError::Unsupported)?;
+    let (raw_path, raw_len) = result::option(helpers::copy_cstr_from_user(path_ptr), SysError::Fault)?;
+    if matches!(
+        &raw_path[..raw_len],
+        DEV_NULL | DEV_ZERO | DEV_TTY | DEV_STDIN | DEV_STDOUT | DEV_STDERR
+    ) {
+        result::ensure(helpers::copy_struct_to_user(stat_ptr, &char_stat()), SysError::Fault)?;
+        return result::ok(0u64);
+    }
+    if &raw_path[..raw_len] == PROC_SELF_EXE {
+        let (exe_path, exe_len) = crate::proc::current_exe_path();
+        result::ensure(exe_len > 0, SysError::NoEntry)?;
+        let mut name_buf = ['\0'; helpers::MAX_PATH_LEN];
+        for (dst, src) in name_buf.iter_mut().zip(exe_path.iter()).take(exe_len) {
+            *dst = *src as char;
+        }
+        let file_idx = result::option(super::fs::fs_find_idx(&name_buf[..exe_len]), SysError::NoEntry)?;
+        let stat = stat_for_file_idx(file_idx, super::fs::fs_file_size(file_idx) as i64);
+        result::ensure(helpers::copy_struct_to_user(stat_ptr, &stat), SysError::Fault)?;
+        return result::ok(0u64);
+    }
     let (name_buf, name_len) =
         result::option(helpers::copy_path_cstr_from_user(path_ptr), SysError::Fault)?;
     let file_idx = result::option(super::fs::fs_find_idx(&name_buf[..name_len]), SysError::NoEntry)?;
@@ -203,6 +298,13 @@ unsafe fn faccessat_impl(dirfd: u64, path_ptr: u64, mode: u64, flags: u64) -> Sy
     result::ensure(mode & !(R_OK | W_OK | X_OK) == 0 || mode == F_OK, SysError::Invalid)?;
 
     let (raw_path, raw_len) = result::option(helpers::copy_cstr_from_user(path_ptr), SysError::Fault)?;
+    if matches!(
+        &raw_path[..raw_len],
+        DEV_NULL | DEV_ZERO | DEV_TTY | DEV_STDIN | DEV_STDOUT | DEV_STDERR | PROC_SELF_EXE
+    ) {
+        result::ensure(mode & X_OK == 0, SysError::Access)?;
+        return result::ok(0u64);
+    }
     if raw_len == 1 && raw_path[0] == b'/' {
         result::ensure(mode & W_OK == 0, SysError::Access)?;
         return result::ok(0u64);
@@ -226,7 +328,9 @@ unsafe fn lseek_impl(fd: u64, offset: u64, whence: u64) -> SysResult {
         DescriptorInfo::File { .. } => {
             result::ok(result::option(proc::seek(fd as usize, offset as i64, whence), SysError::Invalid)?)
         }
-        DescriptorInfo::Pipe | DescriptorInfo::Stdio { .. } => result::err(SysError::NotSeekable),
+        DescriptorInfo::Pipe | DescriptorInfo::Stdio { .. } | DescriptorInfo::CharDevice => {
+            result::err(SysError::NotSeekable)
+        }
     }
 }
 
@@ -351,6 +455,13 @@ unsafe fn unlinkat_impl(dirfd: u64, path_ptr: u64, path_len: u64, flags: u64) ->
     result::ensure(flags == 0 || flags == AT_REMOVEDIR, SysError::Invalid)?;
     result::ensure(flags & AT_REMOVEDIR == 0, SysError::Unsupported)?;
     let _ = path_len;
+    let (raw_path, raw_len) = result::option(helpers::copy_cstr_from_user(path_ptr), SysError::Fault)?;
+    if matches!(
+        &raw_path[..raw_len],
+        DEV_NULL | DEV_ZERO | DEV_TTY | DEV_STDIN | DEV_STDOUT | DEV_STDERR | PROC_SELF_EXE
+    ) {
+        return result::err(SysError::Access);
+    }
     let (name_buf, name_len) =
         result::option(helpers::copy_path_cstr_from_user(path_ptr), SysError::Fault)?;
     result::ensure(crate::vfs::remove(&name_buf[..name_len]), SysError::NoEntry)?;

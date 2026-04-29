@@ -139,7 +139,7 @@ pub unsafe fn init(boot_info: *const CoreOS_BootInfo) {
         core::ptr::read_unaligned(addr_of!((*boot_info).kernel_alloc_size)) as usize;
 
     let start = kernel_phys_base / PAGE_SIZE;
-    let end = (kernel_phys_base + kernel_alloc_size + PAGE_SIZE - 1) / PAGE_SIZE;
+    let end = (kernel_phys_base + kernel_alloc_size).div_ceil(PAGE_SIZE);
 
     for f in start..end {
         if f < MAX_FRAMES && pmm.is_free(f) {

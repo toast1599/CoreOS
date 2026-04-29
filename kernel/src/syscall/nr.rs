@@ -8,14 +8,13 @@ pub struct SyscallMeta {
 
 pub const READ: u64 = 0;
 pub const WRITE: u64 = 1;
-pub const OPEN: u64 = 3;
-pub const CLOSE: u64 = 4;
-pub const FSIZE: u64 = 5;
-pub const LS: u64 = 6;
-pub const TOUCH: u64 = 7;
-pub const RM: u64 = 8;
-pub const WRITE_FILE: u64 = 9;
-pub const PUSH_FILE: u64 = 10;
+pub const OPEN: u64 = 2;
+pub const CLOSE: u64 = 3;
+pub const FSTAT: u64 = 5;
+pub const LSEEK: u64 = 8;
+pub const MMAP: u64 = 9;
+pub const MPROTECT: u64 = 10;
+pub const MUNMAP: u64 = 11;
 pub const BRK: u64 = 12;
 pub const RT_SIGACTION: u64 = 13;
 pub const RT_SIGPROCMASK: u64 = 14;
@@ -25,23 +24,9 @@ pub const PREAD64: u64 = 17;
 pub const PWRITE64: u64 = 18;
 pub const READV: u64 = 19;
 pub const WRITEV: u64 = 20;
-pub const UPTIME_SECONDS: u64 = 21;
 pub const PIPE: u64 = 22;
-pub const REBOOT: u64 = 23;
-pub const PANIC: u64 = 24;
-pub const BOOTTIME: u64 = 25;
-pub const CLEAR_TERMINAL: u64 = 26;
-pub const SLEEP_TICKS: u64 = 27;
-pub const SET_FONT_SCALE: u64 = 28;
-pub const FSTAT: u64 = 29;
-pub const LSEEK: u64 = 30;
-pub const MMAP: u64 = 31;
-pub const MPROTECT: u64 = 32;
-pub const MUNMAP: u64 = 33;
-pub const DUP: u64 = 34;
+pub const DUP: u64 = 32;
 pub const NANOSLEEP: u64 = 35;
-pub const FREE_BYTES: u64 = 36;
-pub const TICKS: u64 = 37;
 pub const GETPID: u64 = 39;
 pub const SENDFILE: u64 = 40;
 pub const SOCKET: u64 = 41;
@@ -58,8 +43,8 @@ pub const SOCKETPAIR: u64 = 53;
 pub const SETSOCKOPT: u64 = 54;
 pub const GETSOCKOPT: u64 = 55;
 pub const CLONE: u64 = 56;
-pub const EXEC: u64 = 57;
-pub const FORK: u64 = 58;
+pub const FORK: u64 = 57;
+pub const EXEC: u64 = 59;
 pub const EXIT: u64 = 60;
 pub const WAITPID: u64 = 61;
 pub const KILL: u64 = 62;
@@ -112,6 +97,21 @@ pub const PREADV: u64 = 295;
 pub const PWRITEV: u64 = 296;
 pub const PRLIMIT64: u64 = 302;
 pub const GETRANDOM: u64 = 318;
+pub const FSIZE: u64 = 1024;
+pub const LS: u64 = 1025;
+pub const TOUCH: u64 = 1026;
+pub const RM: u64 = 1027;
+pub const WRITE_FILE: u64 = 1028;
+pub const PUSH_FILE: u64 = 1029;
+pub const UPTIME_SECONDS: u64 = 1030;
+pub const REBOOT: u64 = 1031;
+pub const PANIC: u64 = 1032;
+pub const BOOTTIME: u64 = 1033;
+pub const CLEAR_TERMINAL: u64 = 1034;
+pub const SLEEP_TICKS: u64 = 1035;
+pub const SET_FONT_SCALE: u64 = 1036;
+pub const FREE_BYTES: u64 = 1037;
+pub const TICKS: u64 = 1038;
 
 #[allow(dead_code)]
 pub const ALL: &[SyscallMeta] = &[
@@ -119,12 +119,11 @@ pub const ALL: &[SyscallMeta] = &[
     SyscallMeta { number: WRITE, name: "write" },
     SyscallMeta { number: OPEN, name: "open" },
     SyscallMeta { number: CLOSE, name: "close" },
-    SyscallMeta { number: FSIZE, name: "fsize" },
-    SyscallMeta { number: LS, name: "ls" },
-    SyscallMeta { number: TOUCH, name: "touch" },
-    SyscallMeta { number: RM, name: "rm" },
-    SyscallMeta { number: WRITE_FILE, name: "write_file" },
-    SyscallMeta { number: PUSH_FILE, name: "push_file" },
+    SyscallMeta { number: FSTAT, name: "fstat" },
+    SyscallMeta { number: LSEEK, name: "lseek" },
+    SyscallMeta { number: MMAP, name: "mmap" },
+    SyscallMeta { number: MPROTECT, name: "mprotect" },
+    SyscallMeta { number: MUNMAP, name: "munmap" },
     SyscallMeta { number: BRK, name: "brk" },
     SyscallMeta { number: RT_SIGACTION, name: "rt_sigaction" },
     SyscallMeta { number: RT_SIGPROCMASK, name: "rt_sigprocmask" },
@@ -134,23 +133,9 @@ pub const ALL: &[SyscallMeta] = &[
     SyscallMeta { number: PWRITE64, name: "pwrite64" },
     SyscallMeta { number: READV, name: "readv" },
     SyscallMeta { number: WRITEV, name: "writev" },
-    SyscallMeta { number: UPTIME_SECONDS, name: "uptime_seconds" },
     SyscallMeta { number: PIPE, name: "pipe" },
-    SyscallMeta { number: REBOOT, name: "reboot" },
-    SyscallMeta { number: PANIC, name: "panic" },
-    SyscallMeta { number: BOOTTIME, name: "boottime" },
-    SyscallMeta { number: CLEAR_TERMINAL, name: "clear_terminal" },
-    SyscallMeta { number: SLEEP_TICKS, name: "sleep_ticks" },
-    SyscallMeta { number: SET_FONT_SCALE, name: "set_font_scale" },
-    SyscallMeta { number: FSTAT, name: "fstat" },
-    SyscallMeta { number: LSEEK, name: "lseek" },
-    SyscallMeta { number: MMAP, name: "mmap" },
-    SyscallMeta { number: MPROTECT, name: "mprotect" },
-    SyscallMeta { number: MUNMAP, name: "munmap" },
     SyscallMeta { number: DUP, name: "dup" },
     SyscallMeta { number: NANOSLEEP, name: "nanosleep" },
-    SyscallMeta { number: FREE_BYTES, name: "free_bytes" },
-    SyscallMeta { number: TICKS, name: "ticks" },
     SyscallMeta { number: GETPID, name: "getpid" },
     SyscallMeta { number: SENDFILE, name: "sendfile" },
     SyscallMeta { number: SOCKET, name: "socket" },
@@ -167,8 +152,8 @@ pub const ALL: &[SyscallMeta] = &[
     SyscallMeta { number: SETSOCKOPT, name: "setsockopt" },
     SyscallMeta { number: GETSOCKOPT, name: "getsockopt" },
     SyscallMeta { number: CLONE, name: "clone" },
-    SyscallMeta { number: EXEC, name: "execve" },
     SyscallMeta { number: FORK, name: "fork" },
+    SyscallMeta { number: EXEC, name: "execve" },
     SyscallMeta { number: EXIT, name: "exit" },
     SyscallMeta { number: WAITPID, name: "waitpid" },
     SyscallMeta { number: KILL, name: "kill" },
@@ -220,7 +205,22 @@ pub const ALL: &[SyscallMeta] = &[
     SyscallMeta { number: PREADV, name: "preadv" },
     SyscallMeta { number: PWRITEV, name: "pwritev" },
     SyscallMeta { number: PRLIMIT64, name: "prlimit64" },
-    SyscallMeta { number: GETRANDOM, name: "getrandom" }
+    SyscallMeta { number: GETRANDOM, name: "getrandom" },
+    SyscallMeta { number: FSIZE, name: "fsize" },
+    SyscallMeta { number: LS, name: "ls" },
+    SyscallMeta { number: TOUCH, name: "touch" },
+    SyscallMeta { number: RM, name: "rm" },
+    SyscallMeta { number: WRITE_FILE, name: "write_file" },
+    SyscallMeta { number: PUSH_FILE, name: "push_file" },
+    SyscallMeta { number: UPTIME_SECONDS, name: "uptime_seconds" },
+    SyscallMeta { number: REBOOT, name: "reboot" },
+    SyscallMeta { number: PANIC, name: "panic" },
+    SyscallMeta { number: BOOTTIME, name: "boottime" },
+    SyscallMeta { number: CLEAR_TERMINAL, name: "clear_terminal" },
+    SyscallMeta { number: SLEEP_TICKS, name: "sleep_ticks" },
+    SyscallMeta { number: SET_FONT_SCALE, name: "set_font_scale" },
+    SyscallMeta { number: FREE_BYTES, name: "free_bytes" },
+    SyscallMeta { number: TICKS, name: "ticks" }
 ];
 
 #[allow(dead_code)]
@@ -230,12 +230,11 @@ pub fn name(number: u64) -> Option<&'static str> {
         WRITE => Some("write"),
         OPEN => Some("open"),
         CLOSE => Some("close"),
-        FSIZE => Some("fsize"),
-        LS => Some("ls"),
-        TOUCH => Some("touch"),
-        RM => Some("rm"),
-        WRITE_FILE => Some("write_file"),
-        PUSH_FILE => Some("push_file"),
+        FSTAT => Some("fstat"),
+        LSEEK => Some("lseek"),
+        MMAP => Some("mmap"),
+        MPROTECT => Some("mprotect"),
+        MUNMAP => Some("munmap"),
         BRK => Some("brk"),
         RT_SIGACTION => Some("rt_sigaction"),
         RT_SIGPROCMASK => Some("rt_sigprocmask"),
@@ -245,23 +244,9 @@ pub fn name(number: u64) -> Option<&'static str> {
         PWRITE64 => Some("pwrite64"),
         READV => Some("readv"),
         WRITEV => Some("writev"),
-        UPTIME_SECONDS => Some("uptime_seconds"),
         PIPE => Some("pipe"),
-        REBOOT => Some("reboot"),
-        PANIC => Some("panic"),
-        BOOTTIME => Some("boottime"),
-        CLEAR_TERMINAL => Some("clear_terminal"),
-        SLEEP_TICKS => Some("sleep_ticks"),
-        SET_FONT_SCALE => Some("set_font_scale"),
-        FSTAT => Some("fstat"),
-        LSEEK => Some("lseek"),
-        MMAP => Some("mmap"),
-        MPROTECT => Some("mprotect"),
-        MUNMAP => Some("munmap"),
         DUP => Some("dup"),
         NANOSLEEP => Some("nanosleep"),
-        FREE_BYTES => Some("free_bytes"),
-        TICKS => Some("ticks"),
         GETPID => Some("getpid"),
         SENDFILE => Some("sendfile"),
         SOCKET => Some("socket"),
@@ -278,8 +263,8 @@ pub fn name(number: u64) -> Option<&'static str> {
         SETSOCKOPT => Some("setsockopt"),
         GETSOCKOPT => Some("getsockopt"),
         CLONE => Some("clone"),
-        EXEC => Some("execve"),
         FORK => Some("fork"),
+        EXEC => Some("execve"),
         EXIT => Some("exit"),
         WAITPID => Some("waitpid"),
         KILL => Some("kill"),
@@ -332,6 +317,21 @@ pub fn name(number: u64) -> Option<&'static str> {
         PWRITEV => Some("pwritev"),
         PRLIMIT64 => Some("prlimit64"),
         GETRANDOM => Some("getrandom"),
+        FSIZE => Some("fsize"),
+        LS => Some("ls"),
+        TOUCH => Some("touch"),
+        RM => Some("rm"),
+        WRITE_FILE => Some("write_file"),
+        PUSH_FILE => Some("push_file"),
+        UPTIME_SECONDS => Some("uptime_seconds"),
+        REBOOT => Some("reboot"),
+        PANIC => Some("panic"),
+        BOOTTIME => Some("boottime"),
+        CLEAR_TERMINAL => Some("clear_terminal"),
+        SLEEP_TICKS => Some("sleep_ticks"),
+        SET_FONT_SCALE => Some("set_font_scale"),
+        FREE_BYTES => Some("free_bytes"),
+        TICKS => Some("ticks"),
         _ => None,
     }
 }

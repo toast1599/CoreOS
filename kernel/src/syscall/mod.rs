@@ -153,7 +153,13 @@ pub extern "C" fn syscall_dispatch(
     frame: u64,
 ) -> u64 {
     unsafe {
-        let ret = dispatch::route(num, arg1, arg2, arg3, arg4, frame);
+        let (arg5, arg6) = if frame != 0 {
+            let frame_ref = &*(frame as *const crate::syscall::types::SyscallFrame);
+            (frame_ref.r8, frame_ref.r9)
+        } else {
+            (0, 0)
+        };
+        let ret = dispatch::route(num, arg1, arg2, arg3, arg4, arg5, arg6, frame);
         process::finish_syscall(num, frame, ret)
     }
 }

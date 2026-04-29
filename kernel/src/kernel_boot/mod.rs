@@ -49,6 +49,10 @@ pub unsafe fn boot_kernel(
     run_embedded_userspace_test(&[
         'p', 'o', 's', 'i', 'x', '_', 'n', 'e', 'w', 's', 'y', 's', '_', 't', 'e', 's', 't',
     ]);
+    run_embedded_userspace_test(&[
+        'm', 'u', 's', 'l', '_', 's', 't', 'a', 'g', 'e', '1', '_', 't', 'e', 's', 't',
+    ]);
+    run_embedded_userspace_test(&['m', 'u', 's', 'l', '_', 'h', 'e', 'l', 'l', 'o']);
 
     boot_info
 }

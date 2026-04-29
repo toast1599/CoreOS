@@ -306,6 +306,17 @@ static inline long syscall5(long num, long a1, long a2, long a3, long a4, long a
   return syscall_ret(ret);
 }
 
+static inline long syscall6(long num, long a1, long a2, long a3, long a4,
+                            long a5, long a6) {
+  long ret;
+  __asm__ volatile("mov %5, %%r10; mov %6, %%r8; mov %7, %%r9; syscall"
+                   : "=a"(ret)
+                   : "0"(num), "D"(a1), "S"(a2), "d"(a3), "r"(a4), "r"(a5),
+                     "r"(a6)
+                   : "rcx", "r8", "r9", "r10", "r11", "memory");
+  return syscall_ret(ret);
+}
+
 static inline void sigemptyset(sigset_t *set) {
   for (int i = 0; i < 16; i++) {
     set->bits[i] = 0;
@@ -509,9 +520,8 @@ static inline int sys_set_tid_address(int *tidptr) {
 }
 static inline void *sys_mmap(void *addr, size_t len, int prot, int flags, int fd,
                              off_t off) {
-  MmapArgs args = {(uint64_t)addr, (uint64_t)len, (uint32_t)prot,
-                   (uint32_t)flags, (int32_t)fd, (int64_t)off};
-  return (void *)syscall1(COREOS_SYS_MMAP, (long)&args);
+  return (void *)syscall6(COREOS_SYS_MMAP, (long)addr, (long)len, prot, flags,
+                          fd, off);
 }
 static inline int sys_mprotect(void *addr, size_t len, int prot) {
   return (int)syscall3(COREOS_SYS_MPROTECT, (long)addr, (long)len, (long)prot);

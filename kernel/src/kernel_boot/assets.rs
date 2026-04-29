@@ -4,6 +4,8 @@ static EMBEDDED_SHELL: &[u8] = include_bytes!("../../../user/shell.elf");
 static EMBEDDED_SYSCALL_TEST: &[u8] = include_bytes!("../../../user/syscall_test.elf");
 static EMBEDDED_SYSCALL_CHILD: &[u8] = include_bytes!("../../../user/syscall_child.elf");
 static EMBEDDED_POSIX_NEWSYS_TEST: &[u8] = include_bytes!("../../../user/posix_newsys_test.elf");
+static EMBEDDED_MUSL_STAGE1_TEST: &[u8] = include_bytes!("../../../user/musl_stage1_test.elf");
+static EMBEDDED_MUSL_HELLO: &[u8] = include_bytes!("../../../user/musl_hello.elf");
 static mut ELF_BUF: [u8; 64 * 1024] = [0u8; 64 * 1024];
 static mut FONT_BUF: [u8; 16 * 1024] = [0u8; 16 * 1024];
 
@@ -112,6 +114,17 @@ pub unsafe fn install_ramfs_payloads(assets: &BootAssets) {
             't', 'e', 's', 't',
         ],
         EMBEDDED_POSIX_NEWSYS_TEST,
+    );
+    preload_ramfs_file(
+        &[
+            'm', 'u', 's', 'l', '_', 's', 't', 'a', 'g', 'e', '1', '_', 't',
+            'e', 's', 't',
+        ],
+        EMBEDDED_MUSL_STAGE1_TEST,
+    );
+    preload_ramfs_file(
+        &['m', 'u', 's', 'l', '_', 'h', 'e', 'l', 'l', 'o'],
+        EMBEDDED_MUSL_HELLO,
     );
 
     if assets.elf_len > 0 {

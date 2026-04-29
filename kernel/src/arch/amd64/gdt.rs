@@ -178,7 +178,7 @@ pub unsafe fn init() {
         "mov ss, ax",
         gdtp  = in(reg) &gdtp,
         kcode = const SEG_KCODE as u64,
-        kdata = const SEG_KDATA as u16,
+        kdata = const SEG_KDATA,
         options(nostack),
     );
 

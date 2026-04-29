@@ -2,7 +2,6 @@ use crate::arch::paging;
 use crate::mem::pmm;
 use crate::proc;
 use crate::proc::task;
-use crate::syscall::helpers;
 use crate::syscall::result::{self, SysError, SysResult};
 
 const PROT_EXEC: u32 = 0x1;
@@ -11,17 +10,6 @@ const MAP_SHARED: u32 = 0x01;
 const MAP_PRIVATE: u32 = 0x02;
 const MAP_FIXED: u32 = 0x10;
 const MAP_ANONYMOUS: u32 = 0x20;
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct MmapArgs {
-    addr: u64,
-    len: u64,
-    prot: u32,
-    flags: u32,
-    fd: i32,
-    off: i64,
-}
 
 fn map_flags_from_prot(prot: u32) -> paging::MapFlags {
     paging::MapFlags {
@@ -73,46 +61,45 @@ unsafe fn brk_impl(addr: u64) -> SysResult {
     result::ok(new_brk as u64)
 }
 
-pub unsafe fn mmap(args_ptr: u64) -> u64 {
-    result::ret(mmap_impl(args_ptr))
+pub unsafe fn mmap(addr: u64, len: u64, prot: u64, flags: u64, fd: u64, off: u64) -> u64 {
+    result::ret(mmap_impl(addr, len, prot as u32, flags as u32, fd as i32, off as i64))
 }
 
-unsafe fn mmap_impl(args_ptr: u64) -> SysResult {
-    let args: MmapArgs = result::option(helpers::copy_struct_from_user(args_ptr), SysError::Fault)?;
-    result::ensure(args.len != 0, SysError::Invalid)?;
-    result::ensure((args.flags & (MAP_PRIVATE | MAP_SHARED)) != 0, SysError::Invalid)?;
-    result::ensure((args.flags & MAP_SHARED) == 0, SysError::Unsupported)?;
-    let anonymous = (args.flags & MAP_ANONYMOUS) != 0;
+unsafe fn mmap_impl(addr: u64, len: u64, prot: u32, flags: u32, fd: i32, off: i64) -> SysResult {
+    result::ensure(len != 0, SysError::Invalid)?;
+    result::ensure((flags & (MAP_PRIVATE | MAP_SHARED)) != 0, SysError::Invalid)?;
+    result::ensure((flags & MAP_SHARED) == 0, SysError::Unsupported)?;
+    let anonymous = (flags & MAP_ANONYMOUS) != 0;
     if anonymous {
-        result::ensure(args.fd == -1 && args.off == 0, SysError::Invalid)?;
+        result::ensure(fd == -1 && off == 0, SysError::Invalid)?;
     } else {
-        result::ensure(args.fd >= 0, SysError::BadFd)?;
-        result::ensure(args.off >= 0 && (args.off as usize & 0xFFF) == 0, SysError::Invalid)?;
+        result::ensure(fd >= 0, SysError::BadFd)?;
+        result::ensure(off >= 0 && (off as usize & 0xFFF) == 0, SysError::Invalid)?;
     }
 
-    let len = ((args.len as usize) + 0xFFF) & !0xFFF;
-    let start = if args.addr == 0 {
+    let len = ((len as usize) + 0xFFF) & !0xFFF;
+    let start = if addr == 0 {
         result::option(proc::reserve_mmap_base(len), SysError::Invalid)?
     } else {
-        let addr = (args.addr as usize) & !0xFFF;
+        let addr = (addr as usize) & !0xFFF;
         result::ensure(
-            (args.flags & MAP_FIXED) != 0 && !proc::region_conflicts(addr, len),
+            (flags & MAP_FIXED) != 0 && !proc::region_conflicts(addr, len),
             SysError::Invalid,
         )?;
         addr
     };
 
     result::ensure(!proc::region_conflicts(start, len), SysError::Invalid)?;
-    result::ensure(proc::alloc_vma(start, len, args.prot, args.flags), SysError::Invalid)?;
+    result::ensure(proc::alloc_vma(start, len, prot, flags), SysError::Invalid)?;
 
     let pml4 = task::current_pml4();
-    let flags = map_flags_from_prot(args.prot);
+    let map_flags = map_flags_from_prot(prot);
     let file_seed = if anonymous {
         None
     } else {
-        match proc::descriptor_info(args.fd as usize) {
+        match proc::descriptor_info(fd as usize) {
             Some(proc::DescriptorInfo::File { file_idx, .. }) => {
-                Some(crate::vfs::read_range(file_idx, args.off as usize, len).unwrap_or_default())
+                Some(crate::vfs::read_range(file_idx, off as usize, len).unwrap_or_default())
             }
             _ => return result::err(SysError::BadFd),
         }
@@ -132,7 +119,7 @@ unsafe fn mmap_impl(args_ptr: u64) -> SysResult {
             }
             return result::err(SysError::NoMem);
         }
-        paging::map_page_in(pml4, start + off, frame, flags);
+        paging::map_page_in(pml4, start + off, frame, map_flags);
         core::ptr::write_bytes(paging::p2v(frame) as *mut u8, 0, 0x1000);
         if let Some(bytes) = file_seed.as_ref() {
             let src = off.min(bytes.len());

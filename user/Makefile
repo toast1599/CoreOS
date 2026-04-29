@@ -1,6 +1,7 @@
 CC      = clang
 ASM     = nasm
 LD      = ld
+MUSLCC  = musl-gcc
 
 # Target: bare-metal x86_64, no standard library
 CFLAGS  = -target x86_64-unknown-none \
@@ -17,7 +18,7 @@ LDFLAGS = -T shell.ld \
           -static
 
 COMMON_OBJS = start.o libcshim/libcshim.o
-ALL_ELFS = shell.elf syscall_test.elf syscall_child.elf posix_newsys_test.elf
+ALL_ELFS = shell.elf syscall_test.elf syscall_child.elf posix_newsys_test.elf musl_stage1_test.elf musl_hello.elf
 
 .PHONY: all clean
 
@@ -38,6 +39,12 @@ syscall_child.o: syscall_child.c libcshim/libcshim.h libcshim/sysnr.h
 posix_newsys_test.o: posix_newsys_test.c libcshim/libcshim.h libcshim/sysnr.h
 	$(CC) $(CFLAGS) -c posix_newsys_test.c -o posix_newsys_test.o
 
+musl_stage1_test.o: musl_stage1_test.c libcshim/libcshim.h libcshim/sysnr.h
+	$(MUSLCC) -static -O2 -I libcshim -c musl_stage1_test.c -o musl_stage1_test.o
+
+musl_hello.o: musl_hello.c
+	$(MUSLCC) -static -O2 -c musl_hello.c -o musl_hello.o
+
 libcshim/libcshim.o: libcshim/libcshim.c libcshim/libcshim.h libcshim/sysnr.h
 	$(CC) $(CFLAGS) -c libcshim/libcshim.c -o libcshim/libcshim.o
 
@@ -52,6 +59,12 @@ syscall_child.elf: $(COMMON_OBJS) syscall_child.o shell.ld
 
 posix_newsys_test.elf: $(COMMON_OBJS) posix_newsys_test.o shell.ld
 	$(LD) $(LDFLAGS) -o posix_newsys_test.elf $(COMMON_OBJS) posix_newsys_test.o
+
+musl_stage1_test.elf: musl_stage1_test.o
+	$(MUSLCC) -static -o musl_stage1_test.elf musl_stage1_test.o
+
+musl_hello.elf: musl_hello.o
+	$(MUSLCC) -static -o musl_hello.elf musl_hello.o
 
 clean:
 	rm -f *.o *.elf

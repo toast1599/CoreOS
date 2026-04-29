@@ -131,7 +131,7 @@ unsafe impl GlobalAlloc for SlabAllocator {
             restore_interrupts(irq_was_enabled);
             res
         } else {
-            let pages_needed = (size + PAGE_SIZE - 1) / PAGE_SIZE;
+            let pages_needed = size.div_ceil(PAGE_SIZE);
             let irq_was_enabled = interrupts_enabled();
             core::arch::asm!("cli", options(nomem, nostack));
             let first = super::pmm::alloc_frames(pages_needed);
@@ -174,7 +174,7 @@ unsafe impl GlobalAlloc for SlabAllocator {
             }
             restore_interrupts(irq_was_enabled);
         } else {
-            let pages_needed = (size + PAGE_SIZE - 1) / PAGE_SIZE;
+            let pages_needed = size.div_ceil(PAGE_SIZE);
             let addr_phys = crate::arch::amd64::paging::v2p(ptr as usize);
             let irq_was_enabled = interrupts_enabled();
             core::arch::asm!("cli", options(nomem, nostack));
