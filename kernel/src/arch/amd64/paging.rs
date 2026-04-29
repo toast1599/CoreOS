@@ -1,6 +1,7 @@
 use crate::boot::CoreOS_BootInfo;
 use crate::mem::pmm::alloc_frame;
 use core::ptr::addr_of;
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 const PTE_PRESENT: u64 = 1 << 0;
 const PTE_WRITABLE: u64 = 1 << 1;
@@ -11,7 +12,7 @@ const PTE_ADDR_MASK: u64 = 0x000f_ffff_ffff_f000;
 
 pub const PHYSICAL_OFFSET: usize = 0xFFFF800000000000;
 const KERNEL_IMAGE_BASE: usize = 0xFFFFFFFF80100000;
-pub static mut KERNEL_PML4: usize = 0;
+pub static KERNEL_PML4: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Clone, Copy)]
 pub struct MapFlags {
@@ -84,47 +85,23 @@ pub unsafe fn init(boot_info: *const CoreOS_BootInfo) {
     let id_pdpt = alloc_table();
 
     // 0xFFFFFFFF80000000 -> PML4 511 (Kernel Map)
-    write_entry(
-        pml4,
-        511,
-        k_pdpt as u64 | PTE_PRESENT | PTE_WRITABLE,
-    );
+    write_entry(pml4, 511, k_pdpt as u64 | PTE_PRESENT | PTE_WRITABLE);
 
     // 0xFFFF800000000000 -> PML4 256 (Direct Map)
-    write_entry(
-        pml4,
-        256,
-        dm_pdpt as u64 | PTE_PRESENT | PTE_WRITABLE,
-    );
+    write_entry(pml4, 256, dm_pdpt as u64 | PTE_PRESENT | PTE_WRITABLE);
 
     // 0x0000000000000000 -> PML4 0 (Identity map)
-    write_entry(
-        pml4,
-        0,
-        id_pdpt as u64 | PTE_PRESENT | PTE_WRITABLE,
-    );
+    write_entry(pml4, 0, id_pdpt as u64 | PTE_PRESENT | PTE_WRITABLE);
 
     // Map first 4GB into Direct Map AND Identity Map.
     for i in 0..4usize {
         let pd = alloc_table();
-        write_entry(
-            dm_pdpt,
-            i,
-            pd as u64 | PTE_PRESENT | PTE_WRITABLE,
-        );
-        write_entry(
-            id_pdpt,
-            i,
-            pd as u64 | PTE_PRESENT | PTE_WRITABLE,
-        );
+        write_entry(dm_pdpt, i, pd as u64 | PTE_PRESENT | PTE_WRITABLE);
+        write_entry(id_pdpt, i, pd as u64 | PTE_PRESENT | PTE_WRITABLE);
 
         for j in 0..512usize {
             let phys = ((i * 512 + j) as u64) * (2 * 1024 * 1024);
-            write_entry(
-                pd,
-                j,
-                phys | PTE_PRESENT | PTE_WRITABLE | PTE_HUGE,
-            );
+            write_entry(pd, j, phys | PTE_PRESENT | PTE_WRITABLE | PTE_HUGE);
         }
     }
 
@@ -143,8 +120,7 @@ pub unsafe fn init(boot_info: *const CoreOS_BootInfo) {
         map_range_2mb(pml4, fb_base, fb_phys, fb_size);
     }
 
-    KERNEL_PML4 = pml4;
-
+    KERNEL_PML4.store(pml4, Ordering::SeqCst);
     core::arch::asm!("mov cr3, {}", in(reg) pml4 as u64, options(nostack, nomem));
     crate::dbg_log!(
         "PAGING",
@@ -283,14 +259,14 @@ pub unsafe fn translate_page(pml4: usize, virt: usize) -> Option<usize> {
         return None;
     }
     if (pde & PTE_HUGE) != 0 {
-        let base = (pde as usize) & !((2 * 1024 * 1024) - 1);
+        let base = (pde & PTE_ADDR_MASK) as usize;
         return Some(base + (virt & ((2 * 1024 * 1024) - 1)));
     }
     let pte = pte_ptr(pml4, virt)?.read_volatile();
     if (pte & PTE_PRESENT) == 0 {
         return None;
     }
-    Some((pte as usize) & !0xFFF)
+    Some((pte & PTE_ADDR_MASK) as usize)
 }
 
 pub unsafe fn unmap_page_in(pml4: usize, virt: usize) -> Option<usize> {
@@ -306,7 +282,7 @@ pub unsafe fn unmap_page_in(pml4: usize, virt: usize) -> Option<usize> {
     if (cr3 as usize & !0xFFF) == pml4 {
         core::arch::asm!("invlpg [{}]", in(reg) virt, options(nostack, nomem));
     }
-    Some((entry as usize) & !0xFFF)
+    Some((entry & PTE_ADDR_MASK) as usize)
 }
 
 pub unsafe fn protect_page_in(pml4: usize, virt: usize, flags: MapFlags) -> bool {
@@ -342,7 +318,7 @@ pub unsafe fn clone_kernel_address_space() -> usize {
     let new_pml4 = alloc_frame();
     core::ptr::write_bytes(p2v(new_pml4) as *mut u8, 0, 4096);
 
-    let src = p2v(KERNEL_PML4) as *const u64;
+    let src = p2v(KERNEL_PML4.load(Ordering::SeqCst)) as *const u64;
     let dst = p2v(new_pml4) as *mut u64;
 
     // copy kernel half

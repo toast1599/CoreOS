@@ -1,8 +1,15 @@
 /// Task management — kernel stacks + round-robin scheduler support.
 use crate::mem::pmm::{alloc_frames, PAGE_SIZE};
 use crate::syscall::types::SyscallFrame;
-
+use core::cell::UnsafeCell;
+use core::sync::atomic::{AtomicUsize, Ordering};
+use spin::Mutex;
 const SYSCALL_FRAME_SIZE: usize = 16 * 8;
+
+struct DeadRspCell(UnsafeCell<usize>);
+unsafe impl Sync for DeadRspCell {}
+
+static DEAD_RSP: DeadRspCell = DeadRspCell(UnsafeCell::new(0));
 
 #[repr(C)]
 pub struct Context {
@@ -33,12 +40,14 @@ pub struct Task {
 
 pub const MAX_TASKS: usize = 8;
 
-static mut TASKS: [Option<Task>; MAX_TASKS] = [None, None, None, None, None, None, None, None];
-static mut CURRENT: usize = 0;
-static mut NEXT_ID: usize = 1;
+static TASKS: Mutex<[Option<Task>; MAX_TASKS]> =
+    Mutex::new([None, None, None, None, None, None, None, None]);
 
+static CURRENT: AtomicUsize = AtomicUsize::new(0);
+static NEXT_ID: AtomicUsize = AtomicUsize::new(1);
 pub unsafe fn add_task(entry: fn()) -> bool {
-    let slot = match TASKS.iter_mut().position(|t| t.is_none()) {
+    let mut tasks = TASKS.lock();
+    let slot = match tasks.iter_mut().position(|t| t.is_none()) {
         Some(s) => s,
         None => {
             crate::dbg_log!("TASK", "no free task slots");
@@ -70,15 +79,13 @@ pub unsafe fn add_task(entry: fn()) -> bool {
         rbp: 0,
     });
 
-    let id = NEXT_ID;
-    NEXT_ID += 1;
-
-    TASKS[slot] = Some(Task {
+    let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
+    tasks[slot] = Some(Task {
         rsp: sp,
         stack_base,
         state: TaskState::Ready,
         id,
-        pml4: crate::arch::paging::KERNEL_PML4,
+        pml4: crate::arch::paging::KERNEL_PML4.load(Ordering::SeqCst),
         rsp_valid: true,
     });
     crate::dbg_log!(
@@ -92,102 +99,98 @@ pub unsafe fn add_task(entry: fn()) -> bool {
 }
 
 #[allow(dead_code)]
-pub unsafe fn current_idx() -> usize {
-    CURRENT
+pub fn current_idx() -> usize {
+    CURRENT.load(Ordering::SeqCst)
 }
-
-pub unsafe fn current_task_slot() -> Option<usize> {
-    Some(CURRENT)
+pub fn current_task_slot() -> Option<usize> {
+    Some(CURRENT.load(Ordering::SeqCst))
 }
-
-pub unsafe fn current_pml4() -> usize {
-    TASKS[CURRENT]
+pub fn current_pml4() -> usize {
+    let tasks = TASKS.lock();
+    tasks[CURRENT.load(Ordering::SeqCst)]
         .as_ref()
         .map(|t| t.pml4)
-        .unwrap_or(crate::arch::paging::KERNEL_PML4)
+        .unwrap_or(crate::arch::paging::KERNEL_PML4.load(Ordering::SeqCst))
 }
 
 pub unsafe fn next_task_switch() -> Option<(*mut usize, usize, usize, u64)> {
-    static mut DEAD_RSP: usize = 0;
+    let mut tasks = TASKS.lock();
+    let cur = CURRENT.load(Ordering::SeqCst);
 
-    crate::serial_fmt!(
-        "[SCHED] cur={} t0={} t1={} t2={}\n",
-        CURRENT,
-        TASKS[0].as_ref().map_or(99, |t| t.state as u8),
-        TASKS[1].as_ref().map_or(99, |t| t.state as u8),
-        TASKS[2].as_ref().map_or(99, |t| t.state as u8),
-    );
-    // Find next ready task (excluding current)
-    let next_idx = {
-        let mut found = None;
-        for i in 1..=MAX_TASKS {
-            let idx = (CURRENT + i) % MAX_TASKS;
-            if let Some(ref t) = TASKS[idx] {
-                if t.state == TaskState::Ready && t.rsp_valid {
-                    found = Some(idx);
-                    break;
-                }
+    let mut next_idx = None;
+    for i in 1..=MAX_TASKS {
+        let idx = (cur + i) % MAX_TASKS;
+        if let Some(ref t) = tasks[idx] {
+            if t.state == TaskState::Ready && t.rsp_valid {
+                next_idx = Some(idx);
+                break;
             }
         }
-        found
-    };
+    }
 
-    let next_idx = match next_idx {
-        Some(i) => i,
-        None => return None,
-    };
+    let next_idx = next_idx?;
 
-    let old_rsp_ptr: *mut usize = match TASKS[CURRENT] {
-        Some(ref mut cur) => {
-            if cur.state == TaskState::Running {
-                cur.state = TaskState::Ready;
+    let old_rsp_ptr: *mut usize = match tasks[cur] {
+        Some(ref mut task) => {
+            if task.state == TaskState::Running {
+                task.state = TaskState::Ready;
             }
-            if cur.state == TaskState::Dead {
-                super::task_slot_reaped(CURRENT);
-                TASKS[CURRENT] = None;
-                &raw mut DEAD_RSP
+
+            if task.state == TaskState::Dead {
+                super::task_slot_reaped(cur);
+                tasks[cur] = None;
+                DEAD_RSP.0.get()
             } else {
-                cur.rsp_valid = true;
-                &mut cur.rsp as *mut usize
+                task.rsp_valid = true;
+                &mut task.rsp as *mut usize
             }
         }
-        None => &raw mut DEAD_RSP,
+        None => DEAD_RSP.0.get(),
     };
 
-    TASKS[next_idx].as_mut().unwrap().state = TaskState::Running;
-    CURRENT = next_idx;
+    tasks[next_idx].as_mut().unwrap().state = TaskState::Running;
 
-    // Update TSS.rsp0 so the CPU knows where the kernel stack is for the next
-    // time this task enters the kernel from ring 3 (interrupt or syscall).
-    let next_stack_top = TASKS[next_idx].as_ref().unwrap().stack_base + 4 * PAGE_SIZE;
+    let next_stack_top = tasks[next_idx].as_ref().unwrap().stack_base + 4 * PAGE_SIZE;
+
+    let next_rsp = tasks[next_idx].as_ref().unwrap().rsp;
+    let next_pml4 = tasks[next_idx].as_ref().unwrap().pml4;
+
+    drop(tasks);
+
+    CURRENT.store(next_idx, Ordering::SeqCst);
+
     crate::arch::gdt::TSS.rsp0 = next_stack_top as u64;
     crate::arch::gdt::TSS_RSP0 = next_stack_top as u64;
 
-    let next_task = TASKS[next_idx].as_ref().unwrap();
     let fs_base = super::THREADS[next_idx]
         .as_ref()
         .map(|thread| thread.fs_base)
         .unwrap_or(0);
 
-    Some((old_rsp_ptr, next_task.rsp, next_task.pml4, fs_base))
+    Some((old_rsp_ptr, next_rsp, next_pml4, fs_base))
 }
-pub unsafe fn init_main_task(stack_base: usize) {
-    TASKS[0] = Some(Task {
+
+pub fn init_main_task(stack_base: usize) {
+    let mut tasks = TASKS.lock();
+    tasks[0] = Some(Task {
         rsp: 0,
         stack_base,
         state: TaskState::Running,
         id: 0,
-        pml4: crate::arch::paging::KERNEL_PML4,
+        pml4: { crate::arch::paging::KERNEL_PML4.load(Ordering::SeqCst) },
         rsp_valid: true,
     });
-    CURRENT = 0;
+    drop(tasks);
+
+    CURRENT.store(0, Ordering::SeqCst);
     crate::dbg_log!("TASK", "main task registered as task 0");
 }
 
 /// Spawn a user task that will jump to ring 3 at `entry` with `stack_top`.
 /// Returns the task slot index, or None on failure.
 pub unsafe fn spawn_user_task(entry: u64, stack_top: u64, pml4: usize) -> Option<usize> {
-    let slot = match TASKS.iter_mut().position(|t| t.is_none()) {
+    let mut tasks = TASKS.lock();
+    let slot = match tasks.iter_mut().position(|t| t.is_none()) {
         Some(s) => s,
         None => {
             crate::dbg_log!("TASK", "no free task slots for user task");
@@ -235,10 +238,8 @@ pub unsafe fn spawn_user_task(entry: u64, stack_top: u64, pml4: usize) -> Option
         rbp: 0,
     });
 
-    let id = NEXT_ID;
-    NEXT_ID += 1;
-
-    TASKS[slot] = Some(Task {
+    let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
+    tasks[slot] = Some(Task {
         rsp: sp,
         stack_base,
         state: TaskState::Ready,
@@ -261,7 +262,8 @@ pub unsafe fn spawn_user_task(entry: u64, stack_top: u64, pml4: usize) -> Option
 }
 
 pub unsafe fn spawn_forked_task(syscall_frame: *const u8, pml4: usize) -> Option<usize> {
-    let slot = match TASKS.iter_mut().position(|t| t.is_none()) {
+    let mut tasks = TASKS.lock();
+    let slot = match tasks.iter_mut().position(|t| t.is_none()) {
         Some(s) => s,
         None => {
             crate::dbg_log!("TASK", "no free task slots for forked task");
@@ -295,9 +297,8 @@ pub unsafe fn spawn_forked_task(syscall_frame: *const u8, pml4: usize) -> Option
         rbp: 0,
     });
 
-    let id = NEXT_ID;
-    NEXT_ID += 1;
-    TASKS[slot] = Some(Task {
+    let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
+    tasks[slot] = Some(Task {
         rsp: sp,
         stack_base,
         state: TaskState::Ready,
@@ -310,10 +311,14 @@ pub unsafe fn spawn_forked_task(syscall_frame: *const u8, pml4: usize) -> Option
     Some(slot)
 }
 
-pub unsafe fn task_frame_mut(slot: usize) -> Option<&'static mut SyscallFrame> {
-    let task = TASKS.get(slot)?.as_ref()?;
-    let frame_ptr = task.rsp + core::mem::size_of::<Context>() + 8;
-    Some(&mut *(frame_ptr as *mut SyscallFrame))
+pub fn task_frame_mut(slot: usize) -> Option<&'static mut SyscallFrame> {
+    let frame_ptr = {
+        let tasks = TASKS.lock();
+        let task = tasks.get(slot)?.as_ref()?;
+        task.rsp + core::mem::size_of::<Context>() + 8
+    };
+
+    Some(unsafe { &mut *(frame_ptr as *mut SyscallFrame) })
 }
 
 /// Trampoline — called via ret from switch_to,
@@ -378,7 +383,9 @@ unsafe extern "C" fn user_task_iretq(entry: u64, stack_top: u64) -> ! {
 }
 
 pub unsafe fn kill_task(slot: usize) {
-    if let Some(ref mut t) = TASKS[slot] {
+    let mut tasks = TASKS.lock();
+
+    if let Some(ref mut t) = tasks[slot] {
         t.state = TaskState::Dead;
         crate::dbg_log!("TASK", "task in slot {} marked dead", slot);
     }
