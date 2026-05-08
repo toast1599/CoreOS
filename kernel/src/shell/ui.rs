@@ -22,6 +22,8 @@ pub unsafe fn run_shell(boot_info: *const boot::CoreOS_BootInfo) -> ! {
     };
     let _ = write!(header, "CoreOS Shell v0.01");
     vga::draw_rect(20, 60, 550, 4, vga::CLOCK_COLOR, boot_info);
+    vga::console::clear_terminal_area();
+    vga::console::set_userspace_cursor(20, 120);
 
     crate::drivers::serial::write_str("Starting default userspace shell...\n");
 

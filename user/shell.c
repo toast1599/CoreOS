@@ -1,395 +1,453 @@
 // Copyright (c) 2026 toast1599
 // SPDX-License-Identifier: GPL-3.0-only
-//
-// CoreOS userspace shell.
-// Compiled with clang -ffreestanding, linked against libcshim + start.asm.
 
-#include "libcshim/libcshim.h"
+#include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+#define LINE_BUF 256
+#define MAX_ARGS 16
+#define MAX_ENV 16
+#define NAME_LEN 32
+#define VALUE_LEN 128
 
-#define STDOUT 1
+#define SYS_PCI_LIST 1067
+#define SYS_PCI_TEST 1068
 
-static void print(const char *s) { puts_fd(STDOUT, s); }
-
-static void println(const char *s) {
-  print(s);
-  print("\n");
+/* Raw syscall interface – self-contained, no external dependencies */
+static long syscall0(long nr) {
+  long ret;
+  __asm__ volatile("syscall" : "=a"(ret) : "0"(nr) : "rcx", "r11", "memory");
+  return ret;
 }
 
-// Print a decimal integer
-static void print_int(long n) {
-  if (n < 0) {
-    putchar('-');
-    n = -n;
-  }
-  if (n == 0) {
-    putchar('0');
-    return;
-  }
-  char buf[20];
-  int i = 0;
-  while (n > 0) {
-    buf[i++] = '0' + (n % 10);
-    n /= 10;
-  }
-  while (i--)
-    putchar(buf[i]); // NB: i is decremented THEN used
+static long syscall1(long nr, long a1) {
+  long ret;
+  register long r10 __asm__("r10");
+  __asm__ volatile("syscall"
+                   : "=a"(ret)
+                   : "0"(nr), "D"(a1)
+                   : "rcx", "r11", "memory");
+  return ret;
 }
 
-// Skip leading whitespace (spaces and carriage returns); return pointer to
-// first non-space
-static const char *skip_spaces(const char *s) {
-  while (*s == ' ' || *s == '\r')
-    s++;
-  return s;
+static long syscall2(long nr, long a1, long a2) {
+  long ret;
+  __asm__ volatile("syscall"
+                   : "=a"(ret)
+                   : "0"(nr), "D"(a1), "S"(a2)
+                   : "rcx", "r11", "memory");
+  return ret;
 }
 
-// Return pointer to first space or end of string
-static const char *next_space(const char *s) {
-  while (*s && *s != ' ')
-    s++;
-  return s;
+static long sys_pci_list(char *buf, size_t len) {
+  return syscall2(SYS_PCI_LIST, (long)buf, (long)len);
 }
 
-// Copy at most `n-1` chars from src to dst, null-terminate.
-static void strncpy_s(char *dst, const char *src, int n) {
-  int i = 0;
-  while (i < n - 1 && src[i]) {
-    dst[i] = src[i];
-    i++;
+static long sys_pci_test(void) { return syscall0(SYS_PCI_TEST); }
+
+struct shell_var {
+  int used;
+  char name[NAME_LEN];
+  char value[VALUE_LEN];
+};
+
+static struct shell_var shell_vars[MAX_ENV];
+static int last_status = 0;
+
+static int streq(const char *a, const char *b) { return strcmp(a, b) == 0; }
+
+static size_t strlcpy_local(char *dst, const char *src, size_t dst_len) {
+  size_t len = strlen(src);
+  if (dst_len != 0) {
+    size_t copy = len < dst_len - 1 ? len : dst_len - 1;
+    memcpy(dst, src, copy);
+    dst[copy] = '\0';
   }
-  dst[i] = '\0';
+  return len;
 }
 
-// ---------------------------------------------------------------------------
-// Command implementations
-// ---------------------------------------------------------------------------
-
-#define CMD_BUF 128
-#define ARG_BUF 64
-
-// help
-static void cmd_help(void) {
-  println("Available commands:");
-  println("  help          - show this message");
-  println("  echo <text>   - print text");
-  println("  ls            - list RamFS files");
-  println("  cat <file>    - print file contents");
-  println("  touch <name>  - create empty file");
-  println("  rm <name>     - delete file");
-  println("  write <f> <t> - overwrite file");
-  println("  push <f> <t>  - append to file");
-  println("  exec <file>   - run ELF from RamFS");
-  println("  meminfo       - show free memory");
-  println("  uptime        - system uptime");
-  println("  ticks         - kernel ticks");
-  println("  sleep <sec>   - sleep for N seconds");
-  println("  font <+/->    - change font size");
-  println("  boottime      - show boot timing");
-  println("  clear         - clear terminal");
-  println("  panic         - trigger pernel kanic");
-  println("  reboot        - reboot system");
-  println("  exit [code]   - exit the shell");
-}
-
-static void cmd_meminfo(void) {
-  long bytes = sys_meminfo();
-  print("Free RAM: ");
-  print_int(bytes);
-  println(" bytes");
-
-  long mb = bytes >> 20;
-  print("Approx:   ");
-  print_int(mb);
-  println(" MB");
-}
-
-static void cmd_uptime(void) {
-  long s = sys_uptime();
-  print("Uptime: ");
-  print_int(s);
-  println(" seconds");
-}
-
-static void cmd_ticks(void) {
-  long t = sys_ticks();
-  print("Kernel ticks: ");
-  print_int(t);
-  print("\n");
-}
-
-static void cmd_sleep(const char *arg) {
-  long n = 0;
-  while (*arg >= '0' && *arg <= '9') {
-    n = n * 10 + (*arg - '0');
-    arg++;
-  }
-  if (n > 0)
-    sys_sleep(n * 100); // 100 ticks per second
-}
-
-static void cmd_font(const char *arg) {
-  if (*arg == '+') {
-    sys_set_font_scale(2); // for now just toggle or set
-  } else if (*arg == '-') {
-    sys_set_font_scale(1);
-  }
-}
-
-static void cmd_boottime(void) {
-  char buf[2048];
-  long n = sys_boottime(buf, sizeof(buf) - 1);
-  if (n > 0) {
-    buf[n] = '\0';
-    print(buf);
-  }
-}
-
-// echo
-static void cmd_echo(const char *args) { println(args); }
-
-// ls — open each named file; we use a probe strategy since we have no
-// directory syscall yet: try names by opening them. Instead, we use a
-// side-channel: open() with an empty name returns MAX on first miss and
-// we can't iterate. For now we rely on a convention: the kernel pre-loads
-// "test" into RamFS. We list what we can open from a known set, plus
-// anything the kernel tells us via a special fd=255 trick.
-//
-// Better approach: add a sys_ls syscall later. For now, just try "test"
-// and a few other well-known names.
-
-static void cmd_ls(void) {
-  char buf[1024];
-  long total = sys_ls(buf, sizeof(buf));
-  if (total <= 0) {
-    puts("(empty)\n");
-    return;
-  }
-  sys_write(STDOUT, buf, (size_t)total);
-  if (total == 0 || buf[total - 1] != '\n') {
-    puts("");
-    puts("");
-  }
-}
-
-static void cmd_touch(const char *arg) {
-  if (!*arg) {
-    puts("usage: touch <name>\n");
-    return;
-  }
-  int fd = open(arg, O_CREAT | O_EXCL | O_RDONLY, 0644);
-  if (fd >= 0 && sys_close(fd) == 0)
-    puts("ok\n");
-  else
-    puts("error: could not create file\n");
-}
-
-static void cmd_rm(const char *arg) {
-  if (!*arg) {
-    puts("usage: rm <name>\n");
-    return;
-  }
-  if (unlinkat(AT_FDCWD, arg, 0) == 0)
-    puts("ok\n");
-  else
-    puts("error: file not found\n");
-}
-
-static void cmd_write(const char *arg) {
-  // usage: write <name> <content>
-  char name[64];
-  int i = 0;
-  while (*arg && *arg != ' ' && i < 63)
-    name[i++] = *arg++;
-  name[i] = '\0';
-  if (*arg == ' ')
-    arg++;
-  if (!name[0]) {
-    puts("usage: write <name> <content>\n");
-    return;
-  }
-  int fd = open(name, O_CREAT | O_TRUNC | O_WRONLY, 0644);
-  if (fd >= 0 && write(fd, arg, str_len(arg)) == (ssize_t)str_len(arg) &&
-      sys_close(fd) == 0)
-    puts("ok\n");
-  else
-    puts("error\n");
-}
-
-static void cmd_push(const char *arg) {
-  // usage: push <name> <content>
-  char name[64];
-  int i = 0;
-  while (*arg && *arg != ' ' && i < 63)
-    name[i++] = *arg++;
-  name[i] = '\0';
-  if (*arg == ' ')
-    arg++;
-  if (!name[0]) {
-    puts("usage: push <name> <content>\n");
-    return;
-  }
-  int fd = open(name, O_CREAT | O_APPEND | O_WRONLY, 0644);
-  if (fd >= 0 && write(fd, arg, str_len(arg)) == (ssize_t)str_len(arg) &&
-      sys_close(fd) == 0)
-    puts("ok\n");
-  else
-    puts("error\n");
-}
-
-// cat
-static void cmd_cat(const char *filename) {
-  if (!filename || !*filename) {
-    println("usage: cat <file>");
-    return;
-  }
-  int fd = sys_open(filename, O_RDONLY, 0);
-  if (fd == -1 || (long)fd == -1L) {
-    print("cat: file not found: ");
-    println(filename);
-    return;
-  }
-  long size = sys_fsize(fd);
-  if (size <= 0) {
-    sys_close(fd);
-    println("(empty file)");
-    return;
-  }
-
-  // Read in chunks of 256 bytes and write to stdout
-  char buf[256];
-  long remaining = size;
-  while (remaining > 0) {
-    long chunk = remaining < 256 ? remaining : 256;
-    long got = sys_read(fd, buf, (size_t)chunk);
-    if (got <= 0)
-      break;
-    sys_write(STDOUT, buf, (size_t)got);
-    remaining -= got;
-  }
-  print("\n");
-  sys_close(fd);
-}
-
-// exec
-static void cmd_exec(const char *filename) {
-  if (!filename || !*filename) {
-    println("usage: exec <file>");
-    return;
-  }
-  print("exec: spawning ");
-  println(filename);
-
-  long pid = sys_exec(filename);
-  if (pid == 0) {
-    println("exec: failed to spawn process");
-    return;
-  }
-  print("exec: pid=");
-  print_int(pid);
-  print("\n");
-
-  long code = sys_waitpid(pid);
-  print("exec: process exited with code ");
-  print_int(code);
-  print("\n");
-}
-
-// ---------------------------------------------------------------------------
-// Parse and dispatch a command line
-// ---------------------------------------------------------------------------
-
-static void dispatch(const char *line) {
-  // Skip leading whitespace
-  line = skip_spaces(line);
-  if (!*line)
-    return;
-
-  // Find end of first word (the command)
-  const char *cmd_end = next_space(line);
-  int cmd_len = (int)(cmd_end - line);
-
-  // Args start after the command and any spaces
-  const char *args = skip_spaces(cmd_end);
-
-  // Copy command word for comparison
-  char cmd[32];
-  strncpy_s(cmd, line, cmd_len + 1 < 32 ? cmd_len + 1 : 32);
-  cmd[cmd_len] = '\0';
-
-  if (str_eq(cmd, "help")) {
-    cmd_help();
-  } else if (str_eq(cmd, "echo")) {
-    cmd_echo(args);
-  } else if (str_eq(cmd, "ls")) {
-    cmd_ls();
-  } else if (str_eq(cmd, "touch")) {
-    cmd_touch(args);
-  } else if (str_eq(cmd, "rm")) {
-    cmd_rm(args);
-  } else if (str_eq(cmd, "write")) {
-    cmd_write(args);
-  } else if (str_eq(cmd, "push")) {
-    cmd_push(args);
-  } else if (str_eq(cmd, "cat")) {
-    cmd_cat(args);
-  } else if (str_eq(cmd, "exec")) {
-    char arg[ARG_BUF];
-    const char *arg_end = next_space(args);
-    size_t len = (size_t)(arg_end - args);
-    if (len >= ARG_BUF)
-      len = ARG_BUF - 1;
-    strncpy_s(arg, args, (int)len + 1); // correct: (dst, src, n)
-    arg[len] = '\0';
-    cmd_exec(arg);
-  } else if (str_eq(cmd, "meminfo")) {
-    cmd_meminfo();
-  } else if (str_eq(cmd, "uptime")) {
-    cmd_uptime();
-  } else if (str_eq(cmd, "ticks")) {
-    cmd_ticks();
-  } else if (str_eq(cmd, "sleep")) {
-    cmd_sleep(args);
-  } else if (str_eq(cmd, "font")) {
-    cmd_font(args);
-  } else if (str_eq(cmd, "boottime")) {
-    cmd_boottime();
-  } else if (str_eq(cmd, "clear")) {
-    sys_clear();
-  } else if (str_eq(cmd, "panic")) {
-    sys_panic();
-  } else if (str_eq(cmd, "reboot")) {
-    sys_reboot();
-  } else if (str_eq(cmd, "exit")) {
-    int code = 0;
-    while (*args >= '0' && *args <= '9') {
-      code = code * 10 + (*args - '0');
-      args++;
+static struct shell_var *find_var(const char *name) {
+  int i;
+  for (i = 0; i < MAX_ENV; i++) {
+    if (shell_vars[i].used && streq(shell_vars[i].name, name)) {
+      return &shell_vars[i];
     }
-    sys_exit(code);
-  } else {
-    print("unknown command: ");
-    println(cmd);
-    println("type 'help' for available commands");
+  }
+  return NULL;
+}
+
+static const char *get_var(const char *name) {
+  struct shell_var *var = find_var(name);
+  return var ? var->value : "";
+}
+
+static void set_var(const char *name, const char *value) {
+  struct shell_var *var = find_var(name);
+  int i;
+
+  if (var == NULL) {
+    for (i = 0; i < MAX_ENV; i++) {
+      if (!shell_vars[i].used) {
+        var = &shell_vars[i];
+        var->used = 1;
+        strlcpy_local(var->name, name, sizeof(var->name));
+        break;
+      }
+    }
+  }
+
+  if (var != NULL) {
+    strlcpy_local(var->value, value, sizeof(var->value));
   }
 }
 
-// ---------------------------------------------------------------------------
-// Main shell loop
-// ---------------------------------------------------------------------------
+static void unset_var(const char *name) {
+  struct shell_var *var = find_var(name);
+  if (var != NULL) {
+    var->used = 0;
+    var->name[0] = '\0';
+    var->value[0] = '\0';
+  }
+}
 
-int main(void) {
-  println("CoreOS userspace shell");
-  println("type 'help' for commands\n");
+static void init_shell_vars(void) {
+  char cwd[VALUE_LEN];
 
-  char line[CMD_BUF];
-  while (1) {
-    print("> ");
-    readline(line, CMD_BUF);
-    dispatch(line);
+  set_var("PS1", "$ ");
+  set_var("HOME", "/");
+  if (getcwd(cwd, sizeof(cwd)) != NULL) {
+    set_var("PWD", cwd);
+  } else {
+    set_var("PWD", "/");
+  }
+}
+
+static int parse_status(const char *s) {
+  int sign = 1;
+  int value = 0;
+
+  if (*s == '-') {
+    sign = -1;
+    s++;
+  }
+  while (*s >= '0' && *s <= '9') {
+    value = value * 10 + (*s - '0');
+    s++;
+  }
+  return sign * value;
+}
+
+static ssize_t read_line(int fd, char *buf, size_t len) {
+  size_t used = 0;
+
+  if (len == 0) {
+    return 0;
+  }
+
+  while (used + 1 < len) {
+    char c = '\0';
+    ssize_t n = read(fd, &c, 1);
+    if (n <= 0) {
+      break;
+    }
+    if (c == '\n') {
+      break;
+    }
+    if (c == '\r') {
+      continue;
+    }
+    buf[used++] = c;
+  }
+
+  buf[used] = '\0';
+  return (ssize_t)used;
+}
+
+static void expand_token(char *token, size_t token_len) {
+  if (token[0] != '$') {
+    return;
+  }
+
+  if (streq(token, "$?")) {
+    char expanded[16];
+    int value = last_status;
+    int i = 0;
+    int j;
+
+    if (value == 0) {
+      strlcpy_local(token, "0", token_len);
+      return;
+    }
+    if (value < 0) {
+      expanded[i++] = '-';
+      value = -value;
+    }
+    {
+      char digits[12];
+      int d = 0;
+      while (value > 0 && d < (int)sizeof(digits)) {
+        digits[d++] = (char)('0' + (value % 10));
+        value /= 10;
+      }
+      for (j = d - 1; j >= 0; j--) {
+        expanded[i++] = digits[j];
+      }
+    }
+    expanded[i] = '\0';
+    strlcpy_local(token, expanded, token_len);
+    return;
+  }
+
+  strlcpy_local(token, get_var(token + 1), token_len);
+}
+
+static int tokenize(char *line, char *argv[MAX_ARGS]) {
+  int argc = 0;
+  char *src = line;
+
+  while (*src != '\0' && argc < MAX_ARGS - 1) {
+    char *dst;
+    int quote = 0;
+
+    while (*src == ' ' || *src == '\t') {
+      src++;
+    }
+    if (*src == '\0') {
+      break;
+    }
+
+    argv[argc++] = src;
+    dst = src;
+
+    while (*src != '\0') {
+      if (quote == 0 && (*src == ' ' || *src == '\t')) {
+        break;
+      }
+      if (*src == '\'' || *src == '"') {
+        if (quote == 0) {
+          quote = *src++;
+          continue;
+        }
+        if (quote == *src) {
+          quote = 0;
+          src++;
+          continue;
+        }
+      }
+      if (*src == '\\' && src[1] != '\0') {
+        src++;
+      }
+      *dst++ = *src++;
+    }
+
+    *dst = '\0';
+    expand_token(argv[argc - 1], VALUE_LEN);
+
+    if (*src != '\0') {
+      *src++ = '\0';
+    }
+  }
+
+  argv[argc] = NULL;
+  return argc;
+}
+
+static int builtin_colon(char *argv[MAX_ARGS], int argc) {
+  (void)argv;
+  (void)argc;
+  return 0;
+}
+
+static int builtin_true(char *argv[MAX_ARGS], int argc) {
+  (void)argv;
+  (void)argc;
+  return 0;
+}
+
+static int builtin_false(char *argv[MAX_ARGS], int argc) {
+  (void)argv;
+  (void)argc;
+  return 1;
+}
+
+static int builtin_echo(char *argv[MAX_ARGS], int argc) {
+  int i;
+  for (i = 1; i < argc; i++) {
+    if (i > 1) {
+      write(STDOUT_FILENO, " ", 1);
+    }
+    write(STDOUT_FILENO, argv[i], strlen(argv[i]));
+  }
+  write(STDOUT_FILENO, "\n", 1);
+  return 0;
+}
+
+static int builtin_pwd(char *argv[MAX_ARGS], int argc) {
+  char cwd[VALUE_LEN];
+  (void)argv;
+  (void)argc;
+  if (getcwd(cwd, sizeof(cwd)) == NULL) {
+    printf("pwd: failed\n");
+    return 1;
+  }
+  printf("%s\n", cwd);
+  set_var("PWD", cwd);
+  return 0;
+}
+
+static int builtin_cd(char *argv[MAX_ARGS], int argc) {
+  char cwd[VALUE_LEN];
+  const char *target = argc > 1 ? argv[1] : get_var("HOME");
+
+  if (target[0] == '\0') {
+    target = "/";
+  }
+  if (chdir(target) != 0) {
+    printf("cd: %s: not found\n", target);
+    return 1;
+  }
+  if (getcwd(cwd, sizeof(cwd)) != NULL) {
+    set_var("PWD", cwd);
   }
   return 0;
+}
+
+static int builtin_export(char *argv[MAX_ARGS], int argc) {
+  int i;
+
+  if (argc == 1) {
+    for (i = 0; i < MAX_ENV; i++) {
+      if (shell_vars[i].used) {
+        printf("export %s=%s\n", shell_vars[i].name, shell_vars[i].value);
+      }
+    }
+    return 0;
+  }
+
+  for (i = 1; i < argc; i++) {
+    char *eq = strchr(argv[i], '=');
+    if (eq == NULL) {
+      if (find_var(argv[i]) == NULL) {
+        set_var(argv[i], "");
+      }
+      continue;
+    }
+    *eq = '\0';
+    set_var(argv[i], eq + 1);
+    *eq = '=';
+  }
+  return 0;
+}
+
+static int builtin_unset(char *argv[MAX_ARGS], int argc) {
+  int i;
+  for (i = 1; i < argc; i++) {
+    unset_var(argv[i]);
+  }
+  return 0;
+}
+
+static int builtin_set(char *argv[MAX_ARGS], int argc) {
+  int i;
+  (void)argv;
+  (void)argc;
+  for (i = 0; i < MAX_ENV; i++) {
+    if (shell_vars[i].used) {
+      printf("%s=%s\n", shell_vars[i].name, shell_vars[i].value);
+    }
+  }
+  return 0;
+}
+
+static int builtin_exit(char *argv[MAX_ARGS], int argc) {
+  int code = argc > 1 ? parse_status(argv[1]) : last_status;
+  exit(code);
+}
+
+static int builtin_help(char *argv[MAX_ARGS], int argc) {
+  (void)argv;
+  (void)argc;
+  printf("Builtins: : true false echo pwd cd export unset set exit help\n");
+  return 0;
+}
+
+static int run_builtin(char *argv[MAX_ARGS], int argc) {
+  if (argc == 0) {
+    return 0;
+  }
+  if (streq(argv[0], ":")) {
+    return builtin_colon(argv, argc);
+  }
+  if (streq(argv[0], "true")) {
+    return builtin_true(argv, argc);
+  }
+  if (streq(argv[0], "false")) {
+    return builtin_false(argv, argc);
+  }
+  if (streq(argv[0], "echo")) {
+    return builtin_echo(argv, argc);
+  }
+  if (streq(argv[0], "pwd")) {
+    return builtin_pwd(argv, argc);
+  }
+  if (streq(argv[0], "cd")) {
+    return builtin_cd(argv, argc);
+  }
+  if (streq(argv[0], "export")) {
+    return builtin_export(argv, argc);
+  }
+  if (streq(argv[0], "unset")) {
+    return builtin_unset(argv, argc);
+  }
+  if (streq(argv[0], "set")) {
+    return builtin_set(argv, argc);
+  }
+  if (streq(argv[0], "exit")) {
+    return builtin_exit(argv, argc);
+  }
+  if (streq(argv[0], "help")) {
+    return builtin_help(argv, argc);
+  }
+  if (streq(argv[0], "pci")) {
+    char buf[2048];
+    long ret = sys_pci_list(buf, sizeof(buf) - 1);
+    if (ret > 0) {
+      buf[ret] = '\0';
+      write(STDOUT_FILENO, buf, (size_t)ret);
+    }
+    return 0;
+  }
+
+  if (streq(argv[0], "pci_test")) {
+    long failures = sys_pci_test();
+    if (failures == 0) {
+      printf("PCI self-test: PASS\n");
+    } else {
+      printf("PCI self-test: %ld failure(s)\n", failures);
+    }
+    return (int)failures;
+  }
+
+  printf("%s: not found\n", argv[0]);
+  return 127;
+}
+
+int main(void) {
+  char line[LINE_BUF];
+  char *argv[MAX_ARGS];
+
+  init_shell_vars();
+  printf("CoreOS sh\n");
+
+  for (;;) {
+    const char *ps1 = get_var("PS1");
+    write(STDOUT_FILENO, ps1, strlen(ps1));
+    if (read_line(STDIN_FILENO, line, sizeof(line)) <= 0) {
+      continue;
+    }
+    last_status = run_builtin(argv, tokenize(line, argv));
+  }
 }

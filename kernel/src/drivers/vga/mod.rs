@@ -33,6 +33,14 @@ pub fn init_global(boot_info: *const CoreOS_BootInfo) {
         FB_WIDTH.store(fb_w, Ordering::Relaxed);
         FB_HEIGHT.store(fb_h, Ordering::Relaxed);
         FONT_BASE.store(font_b, Ordering::Relaxed);
+        crate::serial_fmt!(
+            "[VGA] fb={:#x} pitch={} width={} height={} font={:#x}\n",
+            fb_base,
+            fb_pitch,
+            fb_w,
+            fb_h,
+            font_b
+        );
     }
 }
 
@@ -57,10 +65,13 @@ pub(super) unsafe fn putchar_raw(
     let header_size = core::ptr::read_unaligned(font_ptr.add(8) as *const u32) as usize;
     let bytes_per_glyph = core::ptr::read_unaligned(font_ptr.add(20) as *const u32) as usize;
     let font_height = core::ptr::read_unaligned(font_ptr.add(24) as *const u32) as usize;
+    let font_width = core::ptr::read_unaligned(font_ptr.add(28) as *const u32) as usize;
     let num_glyphs = core::ptr::read_unaligned(font_ptr.add(16) as *const u32) as usize;
 
     if font_height == 0
         || font_height > 32
+        || font_width == 0
+        || font_width > 32
         || bytes_per_glyph == 0
         || bytes_per_glyph > 256
         || num_glyphs == 0
@@ -86,7 +97,7 @@ pub(super) unsafe fn putchar_raw(
             break;
         } // ← stop if we've gone off the bottom
         let bitmask = *glyph.add(row);
-        for bit in 0..8usize {
+        for bit in 0..font_width {
             if (bitmask & (0x80 >> bit)) != 0 {
                 for sy in 0..scale {
                     for sx in 0..scale {

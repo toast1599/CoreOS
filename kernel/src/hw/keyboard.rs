@@ -21,13 +21,14 @@ fn handle_scancode(scancode: u8) {
     let event = hw::ps2::decode_scancode(scancode);
 
     if let Some(c) = hw::ps2::keyevent_to_char(event) {
-        hw::kbd_buffer::KEYBUF.push(c);
-    }
-
-    // Optional debug logging (disabled by default)
-    #[cfg(feature = "kbd_debug")]
-    {
-        crate::serial_fmt!("[KBD] scancode={:#x}\n", scancode);
+        crate::serial_fmt!(
+            "[KBD] scancode=0x{:02x} char='{}'\n",
+            scancode,
+            c.escape_default()
+        );
+        hw::tty::TTY0.input_char(c as u8);
+    } else {
+        crate::serial_fmt!("[KBD] scancode=0x{:02x} no-char\n", scancode);
     }
 }
 

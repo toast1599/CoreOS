@@ -37,14 +37,22 @@ pub unsafe fn read(fd: u64, buf_ptr: u64, count: u64) -> u64 {
 
 unsafe fn read_impl(fd: u64, buf_ptr: u64, count: u64) -> SysResult {
     let count = count as usize;
+    crate::serial_fmt!(
+        "[SYS_READ] fd={} buf={:#x} count={}\n",
+        fd,
+        buf_ptr,
+        count
+    );
     result::ensure(
         crate::usercopy::user_range_ok(buf_ptr, count),
         SysError::Fault,
     )?;
-    result::ok(result::option(
+    let read = result::option(
         read_from_fd(fd as usize, buf_ptr as *mut u8, count),
         SysError::BadFd,
-    )? as u64)
+    )?;
+    crate::serial_fmt!("[SYS_READ] fd={} -> {}\n", fd, read);
+    result::ok(read as u64)
 }
 
 pub unsafe fn writev(fd: u64, iov_ptr: u64, iovcnt: u64) -> u64 {
@@ -114,8 +122,8 @@ pub unsafe fn ioctl(fd: u64, req: u64, argp: u64) -> u64 {
 unsafe fn ioctl_impl(fd: u64, req: u64, argp: u64) -> SysResult {
     result::ensure(
         matches!(
-            crate::proc::descriptor_info(fd as usize),
-            Some(DescriptorInfo::Stdio { .. })
+            crate::proc::get_fd_target(fd as usize),
+            Some(crate::proc::FdTarget::Stdio(_) | crate::proc::FdTarget::Tty)
         ),
         SysError::NotTty,
     )?;

@@ -32,21 +32,19 @@ pub fn yield_now() {
 
 /// Wait while allowing interrupts (used for blocking-style waits).
 pub fn wait_for_event(spins: usize) {
-    let prev = IN_SYSCALL.swap(false, Ordering::Relaxed);
-
     unsafe {
         enable_interrupts();
     }
 
     for _ in 0..spins {
-        core::hint::spin_loop();
+        unsafe {
+            core::arch::asm!("hlt", options(nomem, nostack));
+        }
     }
 
     unsafe {
         disable_interrupts();
     }
-
-    IN_SYSCALL.store(prev, Ordering::Relaxed);
 }
 
 /// Called from PIT interrupt handler.
@@ -142,4 +140,3 @@ unsafe extern "C" fn switch_to(
         "ret",
     );
 }
-

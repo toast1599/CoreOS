@@ -1,7 +1,7 @@
 #pragma once
+#include "sysnr.h"
 #include <stddef.h>
 #include <stdint.h>
-#include "sysnr.h"
 
 typedef long ssize_t;
 typedef long off_t;
@@ -215,7 +215,8 @@ int munmap(void *addr, size_t len);
 int mprotect(void *addr, size_t len, int prot);
 int nanosleep(const struct timespec *req, struct timespec *rem);
 int clock_gettime(int clockid, struct timespec *tp);
-int clock_nanosleep(int clockid, int flags, const struct timespec *req, struct timespec *rem);
+int clock_nanosleep(int clockid, int flags, const struct timespec *req,
+                    struct timespec *rem);
 int dup(int fd);
 int dup2(int oldfd, int newfd);
 int dup3(int oldfd, int newfd, int flags);
@@ -259,10 +260,7 @@ static inline long syscall_ret(long ret) {
 
 static inline long syscall0(long num) {
   long ret;
-  __asm__ volatile("syscall"
-                   : "=a"(ret)
-                   : "0"(num)
-                   : "rcx", "r11", "memory");
+  __asm__ volatile("syscall" : "=a"(ret) : "0"(num) : "rcx", "r11", "memory");
   return syscall_ret(ret);
 }
 
@@ -297,7 +295,8 @@ static inline long syscall4(long num, long a1, long a2, long a3, long a4) {
   return syscall_ret(ret);
 }
 
-static inline long syscall5(long num, long a1, long a2, long a3, long a4, long a5) {
+static inline long syscall5(long num, long a1, long a2, long a3, long a4,
+                            long a5) {
   long ret;
   __asm__ volatile("mov %5, %%r10; mov %6, %%r8; syscall"
                    : "=a"(ret)
@@ -350,7 +349,9 @@ static inline int sys_open(const char *path, int flags, int mode) {
 }
 
 // close(fd)
-static inline int sys_close(int fd) { return (int)syscall1(COREOS_SYS_CLOSE, fd); }
+static inline int sys_close(int fd) {
+  return (int)syscall1(COREOS_SYS_CLOSE, fd);
+}
 
 // fsize(fd) — total byte size of open file
 static inline long sys_fsize(int fd) { return syscall1(COREOS_SYS_FSIZE, fd); }
@@ -358,6 +359,16 @@ static inline long sys_fsize(int fd) { return syscall1(COREOS_SYS_FSIZE, fd); }
 static inline int sys_fstat(int fd, struct stat *st) {
   return (int)syscall2(COREOS_SYS_FSTAT, fd, (long)st);
 }
+
+// HERE
+
+static inline long sys_pci_list(char *buf, size_t len) {
+  return syscall2(COREOS_SYS_PCI_LIST, (long)buf, (long)len);
+}
+
+static inline long sys_pci_test(void) { return syscall0(COREOS_SYS_PCI_TEST); }
+
+// END
 
 static inline long sys_lseek(int fd, long offset, int whence) {
   return syscall3(COREOS_SYS_LSEEK, fd, offset, whence);
@@ -379,16 +390,21 @@ static inline int sys_fcntl(int fd, int cmd, long arg) {
   return (int)syscall3(COREOS_SYS_FCNTL, fd, cmd, arg);
 }
 
-static inline ssize_t sys_pread64(int fd, void *buf, size_t count, off_t offset) {
+static inline ssize_t sys_pread64(int fd, void *buf, size_t count,
+                                  off_t offset) {
   return syscall4(COREOS_SYS_PREAD64, fd, (long)buf, (long)count, (long)offset);
 }
 
-static inline ssize_t sys_pwrite64(int fd, const void *buf, size_t count, off_t offset) {
-  return syscall4(COREOS_SYS_PWRITE64, fd, (long)buf, (long)count, (long)offset);
+static inline ssize_t sys_pwrite64(int fd, const void *buf, size_t count,
+                                   off_t offset) {
+  return syscall4(COREOS_SYS_PWRITE64, fd, (long)buf, (long)count,
+                  (long)offset);
 }
 
-static inline ssize_t sys_sendfile(int out_fd, int in_fd, off_t *offset, size_t count) {
-  return syscall4(COREOS_SYS_SENDFILE, out_fd, in_fd, (long)offset, (long)count);
+static inline ssize_t sys_sendfile(int out_fd, int in_fd, off_t *offset,
+                                   size_t count) {
+  return syscall4(COREOS_SYS_SENDFILE, out_fd, in_fd, (long)offset,
+                  (long)count);
 }
 
 static inline ssize_t sys_readv(int fd, const struct iovec *iov, int iovcnt) {
@@ -427,13 +443,15 @@ typedef struct {
 static inline int sys_write_file(const char *name, size_t name_len,
                                  const void *data, size_t data_len) {
   DataArgs args = {(uint64_t)data, (uint64_t)data_len};
-  return (int)syscall3(COREOS_SYS_WRITE_FILE, (long)name, (long)name_len, (long)&args);
+  return (int)syscall3(COREOS_SYS_WRITE_FILE, (long)name, (long)name_len,
+                       (long)&args);
 }
 
 static inline int sys_push_file(const char *name, size_t name_len,
                                 const void *data, size_t data_len) {
   DataArgs args = {(uint64_t)data, (uint64_t)data_len};
-  return (int)syscall3(COREOS_SYS_PUSH_FILE, (long)name, (long)name_len, (long)&args);
+  return (int)syscall3(COREOS_SYS_PUSH_FILE, (long)name, (long)name_len,
+                       (long)&args);
 }
 
 static inline int sys_pipe(int pipefd[2]) {
@@ -456,10 +474,18 @@ static inline long sys_getgid(void) { return syscall1(COREOS_SYS_GETGID, 0); }
 static inline long sys_getegid(void) { return syscall1(COREOS_SYS_GETEGID, 0); }
 static inline long sys_gettid(void) { return syscall1(COREOS_SYS_GETTID, 0); }
 static inline long sys_getpgrp(void) { return syscall1(COREOS_SYS_GETPGRP, 0); }
-static inline long sys_getpgid(int pid) { return syscall1(COREOS_SYS_GETPGID, pid); }
-static inline long sys_getsid(int pid) { return syscall1(COREOS_SYS_GETSID, pid); }
-static inline int sys_setuid(int uid) { return (int)syscall1(COREOS_SYS_SETUID, uid); }
-static inline int sys_setgid(int gid) { return (int)syscall1(COREOS_SYS_SETGID, gid); }
+static inline long sys_getpgid(int pid) {
+  return syscall1(COREOS_SYS_GETPGID, pid);
+}
+static inline long sys_getsid(int pid) {
+  return syscall1(COREOS_SYS_GETSID, pid);
+}
+static inline int sys_setuid(int uid) {
+  return (int)syscall1(COREOS_SYS_SETUID, uid);
+}
+static inline int sys_setgid(int gid) {
+  return (int)syscall1(COREOS_SYS_SETGID, gid);
+}
 static inline int sys_setpgid(int pid, int pgid) {
   return (int)syscall2(COREOS_SYS_SETPGID, pid, pgid);
 }
@@ -467,10 +493,12 @@ static inline int sys_kill(int pid, int sig) {
   return (int)syscall2(COREOS_SYS_KILL, pid, sig);
 }
 static inline int sys_getresuid(int *ruid, int *euid, int *suid) {
-  return (int)syscall3(COREOS_SYS_GETRESUID, (long)ruid, (long)euid, (long)suid);
+  return (int)syscall3(COREOS_SYS_GETRESUID, (long)ruid, (long)euid,
+                       (long)suid);
 }
 static inline int sys_getresgid(int *rgid, int *egid, int *sgid) {
-  return (int)syscall3(COREOS_SYS_GETRESGID, (long)rgid, (long)egid, (long)sgid);
+  return (int)syscall3(COREOS_SYS_GETRESGID, (long)rgid, (long)egid,
+                       (long)sgid);
 }
 static inline int sys_rt_sigaction(int sig, const void *act, void *oldact,
                                    size_t sigsetsize) {
@@ -509,7 +537,8 @@ static inline int sys_sigaltstack(const stack_t *ss, stack_t *old_ss) {
 static inline unsigned int sys_umask(unsigned int mask) {
   return (unsigned int)syscall1(COREOS_SYS_UMASK, mask);
 }
-static inline int sys_faccessat(int dirfd, const char *path, int mode, int flags) {
+static inline int sys_faccessat(int dirfd, const char *path, int mode,
+                                int flags) {
   return (int)syscall4(COREOS_SYS_FACCESSAT, dirfd, (long)path, mode, flags);
 }
 static inline int sys_sysinfo(struct sysinfo *info) {
@@ -518,8 +547,8 @@ static inline int sys_sysinfo(struct sysinfo *info) {
 static inline int sys_set_tid_address(int *tidptr) {
   return (int)syscall1(COREOS_SYS_SET_TID_ADDRESS, (long)tidptr);
 }
-static inline void *sys_mmap(void *addr, size_t len, int prot, int flags, int fd,
-                             off_t off) {
+static inline void *sys_mmap(void *addr, size_t len, int prot, int flags,
+                             int fd, off_t off) {
   return (void *)syscall6(COREOS_SYS_MMAP, (long)addr, (long)len, prot, flags,
                           fd, off);
 }
@@ -544,8 +573,9 @@ static inline int sys_clock_nanosleep(int clockid, int flags,
                        (long)rem);
 }
 static inline int sys_fork(void) { return (int)syscall1(COREOS_SYS_FORK, 0); }
-static inline int sys_clone(unsigned long flags, void *child_stack, int *parent_tid,
-                            int *child_tid, unsigned long tls) {
+static inline int sys_clone(unsigned long flags, void *child_stack,
+                            int *parent_tid, int *child_tid,
+                            unsigned long tls) {
   return (int)syscall5(COREOS_SYS_CLONE, (long)flags, (long)child_stack,
                        (long)parent_tid, (long)child_tid, (long)tls);
 }
@@ -559,10 +589,12 @@ static inline int sys_tkill(int tid, int sig) {
 static inline int sys_tgkill(int tgid, int tid, int sig) {
   return (int)syscall3(COREOS_SYS_TGKILL, tgid, tid, sig);
 }
-static inline int sys_set_robust_list(struct robust_list_head *head, size_t len) {
+static inline int sys_set_robust_list(struct robust_list_head *head,
+                                      size_t len) {
   return (int)syscall2(COREOS_SYS_SET_ROBUST_LIST, (long)head, (long)len);
 }
-static inline int sys_get_robust_list(int tid, struct robust_list_head **head, size_t *len) {
+static inline int sys_get_robust_list(int tid, struct robust_list_head **head,
+                                      size_t *len) {
   return (int)syscall3(COREOS_SYS_GET_ROBUST_LIST, tid, (long)head, (long)len);
 }
 static inline int sys_dup3(int oldfd, int newfd, int flags) {
@@ -582,7 +614,8 @@ static inline ssize_t sys_readlink(const char *path, char *buf, size_t bufsiz) {
 }
 static inline ssize_t sys_readlinkat(int dirfd, const char *path, char *buf,
                                      size_t bufsiz) {
-  return syscall4(COREOS_SYS_READLINKAT, dirfd, (long)path, (long)buf, (long)bufsiz);
+  return syscall4(COREOS_SYS_READLINKAT, dirfd, (long)path, (long)buf,
+                  (long)bufsiz);
 }
 static inline int sys_fstatat(int dirfd, const char *path, struct stat *st,
                               int flags) {
@@ -596,7 +629,9 @@ static inline int sys_arch_prctl(int code, unsigned long addr) {
 }
 
 // waitpid(pid) — block until child exits, returns exit code
-static inline long sys_waitpid(long pid) { return syscall1(COREOS_SYS_WAITPID, pid); }
+static inline long sys_waitpid(long pid) {
+  return syscall1(COREOS_SYS_WAITPID, pid);
+}
 
 // exit(code)
 static inline void sys_exit(int code) {
@@ -613,7 +648,9 @@ static inline void sys_exit_group(int code) {
 static inline long sys_brk(long addr) { return syscall1(COREOS_SYS_BRK, addr); }
 
 static inline long sys_meminfo() { return syscall1(COREOS_SYS_FREE_BYTES, 0); }
-static inline long sys_uptime() { return syscall1(COREOS_SYS_UPTIME_SECONDS, 0); }
+static inline long sys_uptime() {
+  return syscall1(COREOS_SYS_UPTIME_SECONDS, 0);
+}
 static inline long sys_ticks() { return syscall1(COREOS_SYS_TICKS, 0); }
 static inline void sys_reboot() { syscall1(COREOS_SYS_REBOOT, 0); }
 static inline void sys_panic() { syscall1(COREOS_SYS_PANIC, 0); }
@@ -621,8 +658,12 @@ static inline long sys_boottime(char *buf, int len) {
   return syscall3(COREOS_SYS_BOOTTIME, (long)buf, (long)len, 0);
 }
 static inline void sys_clear() { syscall1(COREOS_SYS_CLEAR_TERMINAL, 0); }
-static inline void sys_sleep(long ticks) { syscall1(COREOS_SYS_SLEEP_TICKS, ticks); }
-static inline void sys_set_font_scale(int scale) { syscall1(COREOS_SYS_SET_FONT_SCALE, (long)scale); }
+static inline void sys_sleep(long ticks) {
+  syscall1(COREOS_SYS_SLEEP_TICKS, ticks);
+}
+static inline void sys_set_font_scale(int scale) {
+  syscall1(COREOS_SYS_SET_FONT_SCALE, (long)scale);
+}
 
 // ---------------------------------------------------------------------------
 // Higher-level helpers

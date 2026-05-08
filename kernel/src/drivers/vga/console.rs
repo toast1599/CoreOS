@@ -75,6 +75,7 @@ pub fn write_byte_to_fb(b: u8) {
     const START_Y: usize = 120;
 
     match b {
+        b'\0' => {}
         b'\n' => {
             x = MARGIN_LEFT;
             y += char_h;
@@ -83,6 +84,23 @@ pub fn write_byte_to_fb(b: u8) {
                     clear_terminal_area();
                 }
                 y = START_Y;
+            }
+        }
+        b'\r' => {
+            x = MARGIN_LEFT;
+        }
+        b'\t' => {
+            let tab_w = char_w * 4;
+            x = ((x - MARGIN_LEFT + tab_w) / tab_w) * tab_w + MARGIN_LEFT;
+            if x + char_w >= fb_w {
+                x = MARGIN_LEFT;
+                y += char_h;
+                if y + char_h >= fb_h {
+                    unsafe {
+                        clear_terminal_area();
+                    }
+                    y = START_Y;
+                }
             }
         }
         b'\x08' => {
@@ -106,8 +124,8 @@ pub fn write_byte_to_fb(b: u8) {
             }
         }
         _ => {
-            // Skip non-ASCII silently
-            if b > 127 {
+            // Skip non-printable and non-ASCII silently.
+            if !(0x20..=0x7e).contains(&b) {
                 USERSPACE_CURSOR_X.store(x, Ordering::Relaxed);
                 USERSPACE_CURSOR_Y.store(y, Ordering::Relaxed);
                 return;

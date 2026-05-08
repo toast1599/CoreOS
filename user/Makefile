@@ -1,4 +1,5 @@
 CC      = clang
+HOSTCC  = gcc
 ASM     = nasm
 LD      = ld
 MUSLCC  = musl-gcc
@@ -18,7 +19,7 @@ LDFLAGS = -T shell.ld \
           -static
 
 COMMON_OBJS = start.o libcshim/libcshim.o
-ALL_ELFS = shell.elf syscall_test.elf syscall_child.elf posix_newsys_test.elf musl_stage1_test.elf musl_hello.elf
+ALL_ELFS = shell.elf syscall_test.elf syscall_child.elf posix_newsys_test.elf musl_hello.elf read_stdin_test.elf
 
 .PHONY: all clean
 
@@ -28,7 +29,7 @@ start.o: start.asm
 	$(ASM) -f elf64 start.asm -o start.o
 
 shell.o: shell.c libcshim/libcshim.h libcshim/sysnr.h
-	$(CC) $(CFLAGS) -c shell.c -o shell.o
+	$(HOSTCC) -ffreestanding -fno-stack-protector -fno-builtin -O2 -I libcshim -mno-red-zone -c shell.c -o shell.o
 
 syscall_test.o: syscall_test.c libcshim/libcshim.h libcshim/sysnr.h
 	$(CC) $(CFLAGS) -c syscall_test.c -o syscall_test.o
@@ -45,6 +46,9 @@ musl_stage1_test.o: musl_stage1_test.c libcshim/libcshim.h libcshim/sysnr.h
 musl_hello.o: musl_hello.c
 	$(MUSLCC) -static -O2 -c musl_hello.c -o musl_hello.o
 
+read_stdin_test.o: read_stdin_test.c libcshim/libcshim.h libcshim/sysnr.h
+	$(CC) $(CFLAGS) -c read_stdin_test.c -o read_stdin_test.o
+
 libcshim/libcshim.o: libcshim/libcshim.c libcshim/libcshim.h libcshim/sysnr.h
 	$(CC) $(CFLAGS) -c libcshim/libcshim.c -o libcshim/libcshim.o
 
@@ -60,11 +64,14 @@ syscall_child.elf: $(COMMON_OBJS) syscall_child.o shell.ld
 posix_newsys_test.elf: $(COMMON_OBJS) posix_newsys_test.o shell.ld
 	$(LD) $(LDFLAGS) -o posix_newsys_test.elf $(COMMON_OBJS) posix_newsys_test.o
 
-musl_stage1_test.elf: musl_stage1_test.o
-	$(MUSLCC) -static -o musl_stage1_test.elf musl_stage1_test.o
+# musl_stage1_test.elf: musl_stage1_test.o
+# 	$(MUSLCC) -static -o musl_stage1_test.elf musl_stage1_test.o
 
 musl_hello.elf: musl_hello.o
 	$(MUSLCC) -static -o musl_hello.elf musl_hello.o
+
+read_stdin_test.elf: $(COMMON_OBJS) read_stdin_test.o shell.ld
+	$(LD) $(LDFLAGS) -o read_stdin_test.elf $(COMMON_OBJS) read_stdin_test.o
 
 clean:
 	rm -f *.o *.elf

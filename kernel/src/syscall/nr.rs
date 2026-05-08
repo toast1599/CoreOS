@@ -112,6 +112,8 @@ pub const SLEEP_TICKS: u64 = 1035;
 pub const SET_FONT_SCALE: u64 = 1036;
 pub const FREE_BYTES: u64 = 1037;
 pub const TICKS: u64 = 1038;
+pub const PCI_LIST: u64 = 1067;
+pub const PCI_TEST: u64 = 1068;
 
 #[allow(dead_code)]
 pub const ALL: &[SyscallMeta] = &[
@@ -220,7 +222,9 @@ pub const ALL: &[SyscallMeta] = &[
     SyscallMeta { number: SLEEP_TICKS, name: "sleep_ticks" },
     SyscallMeta { number: SET_FONT_SCALE, name: "set_font_scale" },
     SyscallMeta { number: FREE_BYTES, name: "free_bytes" },
-    SyscallMeta { number: TICKS, name: "ticks" }
+    SyscallMeta { number: TICKS, name: "ticks" },
+    SyscallMeta { number: PCI_LIST, name: "pci_list" },
+    SyscallMeta { number: PCI_TEST, name: "pci_test" }
 ];
 
 #[allow(dead_code)]
@@ -332,6 +336,8 @@ pub fn name(number: u64) -> Option<&'static str> {
         SET_FONT_SCALE => Some("set_font_scale"),
         FREE_BYTES => Some("free_bytes"),
         TICKS => Some("ticks"),
+        PCI_LIST => Some("pci_list"),
+        PCI_TEST => Some("pci_test"),
         _ => None,
     }
 }

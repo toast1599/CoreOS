@@ -168,15 +168,21 @@ fn build_image(sh: &Shell) -> Result<()> {
     )
     .quiet()
     .run()?;
-    cmd!(
-        sh,
-        "mcopy -i {image} user/musl_stage1_test.elf ::/musl_stage1_test.elf"
-    )
-    .quiet()
-    .run()?;
+    // cmd!(
+    //     sh,
+    //     "mcopy -i {image} user/musl_stage1_test.elf ::/musl_stage1_test.elf"
+    // )
+    // .quiet()
+    // .run()?;
     cmd!(sh, "mcopy -i {image} user/musl_hello.elf ::/musl_hello.elf")
         .quiet()
         .run()?;
+    cmd!(
+        sh,
+        "mcopy -i {image} user/read_stdin_test.elf ::/read_stdin_test.elf"
+    )
+    .quiet()
+    .run()?;
 
     // Assets
     cmd!(sh, "mcopy -i {image} assets/font.psfu ::/")
@@ -195,7 +201,8 @@ fn run_qemu(sh: &Shell) -> Result<()> {
 
     cmd!(
         sh,
-        "qemu-system-x86_64 -snapshot -bios /usr/share/ovmf/x64/OVMF.4m.fd -drive file={tmp},format=raw,if=ide -net none -serial stdio -m 512M -no-reboot -no-shutdown"
+        "qemu-system-x86_64  -enable-kvm  -cpu host -snapshot -device e1000,netdev=net0 -netdev user,id=net0  -bios
+       /usr/share/ovmf/x64/OVMF.4m.fd -drive file={tmp},format=raw,if=ide -net none -serial stdio -m 512M -no-reboot -no-shutdown"
     )
     .quiet().run()?;
     std::fs::remove_file(tmp).ok();

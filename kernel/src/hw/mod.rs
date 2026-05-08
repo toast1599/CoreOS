@@ -1,9 +1,11 @@
 pub mod kbd_buffer;
 pub mod keyboard;
+pub mod pci;
 pub mod pic;
 pub mod pit;
 pub mod ps2;
 pub mod rtc;
+pub mod tty;
 
 /// Reboot the machine by pulsing the CPU reset line via the PS/2 controller.
 pub unsafe fn reboot() -> ! {
@@ -29,4 +31,3 @@ pub unsafe fn shutdown() -> ! {
         core::arch::asm!("cli; hlt");
     }
 }
-
