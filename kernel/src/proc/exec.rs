@@ -67,8 +67,8 @@ unsafe fn build_initial_stack(
     let execfn_ptr = push_user_bytes(pml4, &mut stack_top, &execfn[..=exec_len], 1)?;
 
     let random_bytes = [
-        0x13, 0x37, 0xca, 0xfe, 0xba, 0xbe, 0xde, 0xad,
-        0xfa, 0xce, 0x12, 0x34, 0x56, 0x78, 0xab, 0xcd,
+        0x13, 0x37, 0xca, 0xfe, 0xba, 0xbe, 0xde, 0xad, 0xfa, 0xce, 0x12, 0x34, 0x56, 0x78, 0xab,
+        0xcd,
     ];
     let random_ptr = push_user_bytes(pml4, &mut stack_top, &random_bytes, 16)?;
 
@@ -79,19 +79,58 @@ unsafe fn build_initial_stack(
     let egid = process.map(|p| p.egid as u64).unwrap_or(0);
 
     let auxv = [
-        AuxEntry { key: AT_PHDR, value: image.phdr },
-        AuxEntry { key: AT_PHENT, value: image.phent },
-        AuxEntry { key: AT_PHNUM, value: image.phnum },
-        AuxEntry { key: AT_PAGESZ, value: PAGE_SIZE as u64 },
-        AuxEntry { key: AT_ENTRY, value: image.entry },
-        AuxEntry { key: AT_UID, value: uid },
-        AuxEntry { key: AT_EUID, value: euid },
-        AuxEntry { key: AT_GID, value: gid },
-        AuxEntry { key: AT_EGID, value: egid },
-        AuxEntry { key: AT_SECURE, value: 0 },
-        AuxEntry { key: AT_RANDOM, value: random_ptr },
-        AuxEntry { key: AT_EXECFN, value: execfn_ptr },
-        AuxEntry { key: AT_NULL, value: 0 },
+        AuxEntry {
+            key: AT_PHDR,
+            value: image.phdr,
+        },
+        AuxEntry {
+            key: AT_PHENT,
+            value: image.phent,
+        },
+        AuxEntry {
+            key: AT_PHNUM,
+            value: image.phnum,
+        },
+        AuxEntry {
+            key: AT_PAGESZ,
+            value: PAGE_SIZE as u64,
+        },
+        AuxEntry {
+            key: AT_ENTRY,
+            value: image.entry,
+        },
+        AuxEntry {
+            key: AT_UID,
+            value: uid,
+        },
+        AuxEntry {
+            key: AT_EUID,
+            value: euid,
+        },
+        AuxEntry {
+            key: AT_GID,
+            value: gid,
+        },
+        AuxEntry {
+            key: AT_EGID,
+            value: egid,
+        },
+        AuxEntry {
+            key: AT_SECURE,
+            value: 0,
+        },
+        AuxEntry {
+            key: AT_RANDOM,
+            value: random_ptr,
+        },
+        AuxEntry {
+            key: AT_EXECFN,
+            value: execfn_ptr,
+        },
+        AuxEntry {
+            key: AT_NULL,
+            value: 0,
+        },
     ];
 
     for entry in auxv.iter().rev() {
@@ -159,7 +198,7 @@ pub unsafe fn exec_as_task(elf_data: &[u8], name: &[char]) -> (usize, usize) {
     // -----------------------------------------------------------------------
     // 5. Register process entry
     // -----------------------------------------------------------------------
-    let pid = super::spawn_named(slot, new_pml4, name);
+    let pid = super::spawn_named(slot, name);
     crate::dbg_log!("EXEC", "process pid={} running in task slot={}", pid, slot);
     (pid, slot)
 }

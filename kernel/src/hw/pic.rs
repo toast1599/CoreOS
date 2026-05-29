@@ -65,4 +65,3 @@ pub unsafe fn eoi(irq: u8) {
     }
     outb(PIC1_CMD, 0x20);
 }
-

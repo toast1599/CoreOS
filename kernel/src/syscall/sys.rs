@@ -55,7 +55,10 @@ pub fn syscall_uname(buf: u64) -> u64 {
 fn syscall_uname_impl(buf: u64) -> SysResult {
     result::ensure(buf != 0, SysError::Fault)?;
     let uts = UtsName::new();
-    result::ensure(unsafe { helpers::copy_struct_to_user(buf, &uts) }, SysError::Fault)?;
+    result::ensure(
+        unsafe { helpers::copy_struct_to_user(buf, &uts) },
+        SysError::Fault,
+    )?;
     result::ok(0u64)
 }
 
@@ -106,7 +109,10 @@ fn syscall_getrlimit_impl(resource: i32, rlim: u64) -> SysResult {
         },
         _ => return result::err(SysError::Invalid),
     };
-    result::ensure(unsafe { helpers::copy_struct_to_user(rlim, &limit) }, SysError::Fault)?;
+    result::ensure(
+        unsafe { helpers::copy_struct_to_user(rlim, &limit) },
+        SysError::Fault,
+    )?;
     result::ok(0u64)
 }
 
@@ -161,7 +167,10 @@ pub fn syscall_chdir(path_ptr: u64) -> u64 {
 }
 
 fn syscall_chdir_impl(path_ptr: u64) -> SysResult {
-    let (raw, raw_len) = result::option(unsafe { helpers::copy_cstr_from_user(path_ptr) }, SysError::Fault)?;
+    let (raw, raw_len) = result::option(
+        unsafe { helpers::copy_cstr_from_user(path_ptr) },
+        SysError::Fault,
+    )?;
     if raw_len == 1 && raw[0] == b'/' {
         return result::ok(0u64);
     }
@@ -179,7 +188,10 @@ pub fn syscall_sigaltstack(ss_ptr: u64, old_ss_ptr: u64) -> u64 {
 }
 
 fn syscall_sigaltstack_impl(_ss_ptr: u64, old_ss_ptr: u64) -> SysResult {
-    let thread = result::option(unsafe { crate::proc::current_thread_mut() }, SysError::Invalid)?;
+    let thread = result::option(
+        unsafe { crate::proc::current_thread_mut() },
+        SysError::Invalid,
+    )?;
     if old_ss_ptr != 0 {
         let mut current = thread.sig_altstack;
         if thread.on_altstack {
@@ -191,12 +203,17 @@ fn syscall_sigaltstack_impl(_ss_ptr: u64, old_ss_ptr: u64) -> SysResult {
         )?;
     }
     if _ss_ptr != 0 {
-        let mut new_stack: StackT =
-            result::option(unsafe { helpers::copy_struct_from_user(_ss_ptr) }, SysError::Fault)?;
+        let mut new_stack: StackT = result::option(
+            unsafe { helpers::copy_struct_from_user(_ss_ptr) },
+            SysError::Fault,
+        )?;
         if (new_stack.ss_flags & 2) != 0 {
             new_stack = StackT::disabled();
         } else {
-            result::ensure(new_stack.ss_sp != 0 && new_stack.ss_size != 0, SysError::Invalid)?;
+            result::ensure(
+                new_stack.ss_sp != 0 && new_stack.ss_size != 0,
+                SysError::Invalid,
+            )?;
             new_stack.ss_flags = 0;
         }
         thread.sig_altstack = new_stack;
@@ -239,7 +256,10 @@ fn syscall_arch_prctl_impl(code: u64, addr: u64) -> SysResult {
     match code {
         ARCH_SET_FS => {
             result::ensure(addr < USER_TOP, SysError::Invalid)?;
-            let thread = result::option(unsafe { crate::proc::current_thread_mut() }, SysError::Invalid)?;
+            let thread = result::option(
+                unsafe { crate::proc::current_thread_mut() },
+                SysError::Invalid,
+            )?;
             thread.fs_base = addr;
             unsafe { crate::arch::amd64::cpu::write_fs_base(addr) };
             result::ok(0u64)
@@ -247,7 +267,10 @@ fn syscall_arch_prctl_impl(code: u64, addr: u64) -> SysResult {
         ARCH_GET_FS => {
             result::ensure(addr != 0, SysError::Fault)?;
             let fs_base = unsafe { crate::proc::current_fs_base() };
-            result::ensure(unsafe { helpers::copy_struct_to_user(addr, &fs_base) }, SysError::Fault)?;
+            result::ensure(
+                unsafe { helpers::copy_struct_to_user(addr, &fs_base) },
+                SysError::Fault,
+            )?;
             result::ok(0u64)
         }
         _ => result::err(SysError::Invalid),
@@ -273,9 +296,15 @@ pub fn syscall_getrandom(buf_ptr: u64, len: u64, flags: u64) -> u64 {
 }
 
 fn syscall_getrandom_impl(buf_ptr: u64, len: u64, flags: u64) -> SysResult {
-    result::ensure(flags & !(GRND_NONBLOCK | GRND_RANDOM) == 0, SysError::Invalid)?;
+    result::ensure(
+        flags & !(GRND_NONBLOCK | GRND_RANDOM) == 0,
+        SysError::Invalid,
+    )?;
     let len = len as usize;
-    result::ensure(crate::usercopy::user_range_ok(buf_ptr, len), SysError::Fault)?;
+    result::ensure(
+        crate::usercopy::user_range_ok(buf_ptr, len),
+        SysError::Fault,
+    )?;
 
     let mut bytes = vec![0u8; len];
     let mut remaining = 0u64;
@@ -287,6 +316,9 @@ fn syscall_getrandom_impl(buf_ptr: u64, len: u64, flags: u64) -> SysResult {
         remaining >>= 8;
     }
 
-    result::ensure(unsafe { crate::usercopy::copy_to_user(buf_ptr, &bytes) }.is_ok(), SysError::Fault)?;
+    result::ensure(
+        unsafe { crate::usercopy::copy_to_user(buf_ptr, &bytes) }.is_ok(),
+        SysError::Fault,
+    )?;
     result::ok(len as u64)
 }

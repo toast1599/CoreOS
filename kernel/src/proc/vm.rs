@@ -21,13 +21,7 @@ pub unsafe fn alloc_vma(start: usize, len: usize, prot: u32, flags: u32) -> bool
     };
     for vma in &mut p.vmas {
         if !vma.in_use {
-            *vma = VmRegion {
-                start,
-                len,
-                prot,
-                flags,
-                in_use: true,
-            };
+            *vma = VmRegion::new(start, len, prot, flags);
             return true;
         }
     }
@@ -36,7 +30,9 @@ pub unsafe fn alloc_vma(start: usize, len: usize, prot: u32, flags: u32) -> bool
 
 pub unsafe fn find_vma_exact_mut(start: usize, len: usize) -> Option<&'static mut VmRegion> {
     let p = current_process_mut()?;
-    p.vmas.iter_mut().find(|v| v.in_use && v.start == start && v.len == len)
+    p.vmas
+        .iter_mut()
+        .find(|v| v.in_use && v.start == start && v.len == len)
 }
 
 pub unsafe fn reserve_mmap_base(len: usize) -> Option<usize> {

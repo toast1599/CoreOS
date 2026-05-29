@@ -2,8 +2,8 @@ use crate::arch::paging;
 use crate::proc;
 use crate::proc::scheduler;
 use crate::proc::task;
-use crate::syscall::nr;
 use crate::syscall::helpers;
+use crate::syscall::nr;
 use crate::syscall::result::{self, SysError, SysResult};
 use crate::syscall::types::{SigAction, SigSet, SyscallFrame, TimeSpec};
 
@@ -53,8 +53,7 @@ const CLONE_NEWPID: u64 = 0x2000_0000;
 const CLONE_NEWNET: u64 = 0x4000_0000;
 const CLONE_IO: u64 = 0x8000_0000;
 const CLONE_SIGNAL_MASK: u64 = 0xff;
-const CLONE_THREAD_FLAGS: u64 =
-    CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND | CLONE_THREAD;
+const CLONE_THREAD_FLAGS: u64 = CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND | CLONE_THREAD;
 const CLONE_SUPPORTED_MASK: u64 =
     CLONE_CHILD_CLEARTID | CLONE_CHILD_SETTID | CLONE_SETTLS | CLONE_PARENT_SETTID;
 const FUTEX_WAIT: u64 = 0;
@@ -252,7 +251,10 @@ unsafe fn deliver_pending_signal(frame_ptr: u64) -> SysResult {
         helpers::copy_struct_to_user(restorer_ptr, &action.restorer),
         SysError::Fault,
     )?;
-    result::ensure(helpers::copy_struct_to_user(saved_frame_ptr, &*frame), SysError::Fault)?;
+    result::ensure(
+        helpers::copy_struct_to_user(saved_frame_ptr, &*frame),
+        SysError::Fault,
+    )?;
 
     let mut combined_mask = thread.sig_mask;
     sigset_add(&mut combined_mask, sig);
@@ -275,10 +277,14 @@ pub unsafe fn finish_syscall(num: u64, frame_ptr: u64, ret: u64) -> u64 {
         frame.rax = ret;
     }
     if num == nr::RT_SIGRETURN {
-        return current_frame(frame_ptr).map(|frame| frame.rax).unwrap_or(ret);
+        return current_frame(frame_ptr)
+            .map(|frame| frame.rax)
+            .unwrap_or(ret);
     }
     let _ = deliver_pending_signal(frame_ptr);
-    current_frame(frame_ptr).map(|frame| frame.rax).unwrap_or(ret)
+    current_frame(frame_ptr)
+        .map(|frame| frame.rax)
+        .unwrap_or(ret)
 }
 
 unsafe fn futex_wait(uaddr: u64, expected: u32, timeout_ptr: u64) -> SysResult {
@@ -292,7 +298,10 @@ unsafe fn futex_wait(uaddr: u64, expected: u32, timeout_ptr: u64) -> SysResult {
     } else {
         let timeout: TimeSpec =
             result::option(helpers::copy_struct_from_user(timeout_ptr), SysError::Fault)?;
-        result::ensure(timeout.tv_sec >= 0 && timeout.tv_nsec >= 0, SysError::Invalid)?;
+        result::ensure(
+            timeout.tv_sec >= 0 && timeout.tv_nsec >= 0,
+            SysError::Invalid,
+        )?;
         let total_ns = (timeout.tv_sec as u64)
             .saturating_mul(1_000_000_000)
             .saturating_add(timeout.tv_nsec as u64);
@@ -313,8 +322,7 @@ unsafe fn futex_wait(uaddr: u64, expected: u32, timeout_ptr: u64) -> SysResult {
         if !FUTEX_WAITERS[slot].in_use {
             return result::ok(0u64);
         }
-        let current: u32 =
-            result::option(helpers::copy_struct_from_user(uaddr), SysError::Fault)?;
+        let current: u32 = result::option(helpers::copy_struct_from_user(uaddr), SysError::Fault)?;
         if current != expected {
             FUTEX_WAITERS[slot] = FutexWaiter::empty();
             return result::err(SysError::Again);
@@ -363,7 +371,9 @@ unsafe fn release_robust_list() {
     let Some(thread) = proc::current_thread() else {
         return;
     };
-    if thread.robust_list_head == 0 || thread.robust_list_len != core::mem::size_of::<RobustListHead>() {
+    if thread.robust_list_head == 0
+        || thread.robust_list_len != core::mem::size_of::<RobustListHead>()
+    {
         return;
     }
     let tid = thread.tid as u32;
@@ -390,7 +400,8 @@ unsafe fn release_robust_list() {
 
     if head.list_op_pending != 0 {
         let futex_addr = if head.futex_offset >= 0 {
-            head.list_op_pending.saturating_add(head.futex_offset as u64)
+            head.list_op_pending
+                .saturating_add(head.futex_offset as u64)
         } else {
             head.list_op_pending
                 .saturating_sub((-head.futex_offset) as u64)
@@ -512,12 +523,16 @@ pub unsafe fn syscall_tkill(tid: u64, sig: u64) -> u64 {
 unsafe fn syscall_tkill_impl(tid: u64, sig: u64) -> SysResult {
     result::ensure(tid != 0, SysError::Invalid)?;
     result::ensure(sig < 65, SysError::Invalid)?;
-    let slot = result::option(proc::find_thread_slot_by_tid(tid as usize), SysError::NoEntry)?;
+    let slot = result::option(
+        proc::find_thread_slot_by_tid(tid as usize),
+        SysError::NoEntry,
+    )?;
     if sig == 0 {
         return result::ok(0u64);
     }
     if sig as usize == SIGKILL {
-        let group_slot = result::option(proc::THREADS[slot].as_ref(), SysError::NoEntry)?.group_slot;
+        let group_slot =
+            result::option(proc::THREADS[slot].as_ref(), SysError::NoEntry)?.group_slot;
         terminate_process_group(group_slot, SIGKILL);
         return result::ok(0u64);
     }
@@ -531,9 +546,15 @@ pub unsafe fn syscall_tgkill(tgid: u64, tid: u64, sig: u64) -> u64 {
 
 unsafe fn syscall_tgkill_impl(tgid: u64, tid: u64, sig: u64) -> SysResult {
     result::ensure(tgid != 0 && tid != 0, SysError::Invalid)?;
-    let slot = result::option(proc::find_thread_slot_by_tid(tid as usize), SysError::NoEntry)?;
+    let slot = result::option(
+        proc::find_thread_slot_by_tid(tid as usize),
+        SysError::NoEntry,
+    )?;
     let thread = result::option(proc::THREADS[slot].as_ref(), SysError::NoEntry)?;
-    let process = result::option(proc::PROCESSES[thread.group_slot].as_ref(), SysError::NoEntry)?;
+    let process = result::option(
+        proc::PROCESSES[thread.group_slot].as_ref(),
+        SysError::NoEntry,
+    )?;
     result::ensure(process.pid == tgid as usize, SysError::NoEntry)?;
     syscall_tkill_impl(tid, sig)
 }
@@ -676,15 +697,27 @@ pub unsafe fn syscall_rt_sigprocmask(how: u64, set: u64, oldset: u64, sigsetsize
     result::ret(syscall_rt_sigprocmask_impl(how, set, oldset, sigsetsize))
 }
 
-unsafe fn syscall_rt_sigprocmask_impl(how: u64, set: u64, oldset: u64, sigsetsize: u64) -> SysResult {
+unsafe fn syscall_rt_sigprocmask_impl(
+    how: u64,
+    set: u64,
+    oldset: u64,
+    sigsetsize: u64,
+) -> SysResult {
     result::ensure(sigsetsize == SIGSET_SIZE, SysError::Invalid)?;
-    result::ensure(matches!(how, SIG_BLOCK | SIG_UNBLOCK | SIG_SETMASK), SysError::Invalid)?;
+    result::ensure(
+        matches!(how, SIG_BLOCK | SIG_UNBLOCK | SIG_SETMASK),
+        SysError::Invalid,
+    )?;
     let thread = result::option(proc::current_thread_mut(), SysError::Invalid)?;
     if oldset != 0 {
-        result::ensure(helpers::copy_struct_to_user(oldset, &thread.sig_mask), SysError::Fault)?;
+        result::ensure(
+            helpers::copy_struct_to_user(oldset, &thread.sig_mask),
+            SysError::Fault,
+        )?;
     }
     if set != 0 {
-        let mut new_set: SigSet = result::option(helpers::copy_struct_from_user(set), SysError::Fault)?;
+        let mut new_set: SigSet =
+            result::option(helpers::copy_struct_from_user(set), SysError::Fault)?;
         sanitize_sigmask(&mut new_set);
         match how {
             SIG_BLOCK => {
@@ -733,7 +766,7 @@ unsafe fn syscall_fork_impl(frame_ptr: u64) -> SysResult {
         task::spawn_forked_task(frame_ptr as *const u8, child_pml4),
         SysError::Invalid,
     )?;
-    let child_pid = proc::fork_current(child_slot, child_pml4);
+    let child_pid = proc::fork_current(child_slot);
     result::ok(child_pid as u64)
 }
 
@@ -763,31 +796,38 @@ unsafe fn syscall_clone_impl(
     let unsupported = flags & !(CLONE_SIGNAL_MASK | CLONE_SUPPORTED_MASK | CLONE_THREAD_FLAGS);
     result::ensure(unsupported == 0, SysError::Unsupported)?;
     result::ensure(
-        (flags & (CLONE_VFORK
-            | CLONE_PARENT
-            | CLONE_PIDFD
-            | CLONE_PTRACE
-            | CLONE_NEWNS
-            | CLONE_SYSVSEM
-            | CLONE_DETACHED
-            | CLONE_UNTRACED
-            | CLONE_NEWCGROUP
-            | CLONE_NEWUTS
-            | CLONE_NEWIPC
-            | CLONE_NEWUSER
-            | CLONE_NEWPID
-            | CLONE_NEWNET
-            | CLONE_IO))
+        (flags
+            & (CLONE_VFORK
+                | CLONE_PARENT
+                | CLONE_PIDFD
+                | CLONE_PTRACE
+                | CLONE_NEWNS
+                | CLONE_SYSVSEM
+                | CLONE_DETACHED
+                | CLONE_UNTRACED
+                | CLONE_NEWCGROUP
+                | CLONE_NEWUTS
+                | CLONE_NEWIPC
+                | CLONE_NEWUSER
+                | CLONE_NEWPID
+                | CLONE_NEWNET
+                | CLONE_IO))
             == 0,
         SysError::Unsupported,
     )?;
     let exit_signal = (flags & CLONE_SIGNAL_MASK) as usize;
     let thread_clone = (flags & CLONE_THREAD) != 0;
     if thread_clone {
-        result::ensure((flags & CLONE_THREAD_FLAGS) == CLONE_THREAD_FLAGS, SysError::Invalid)?;
+        result::ensure(
+            (flags & CLONE_THREAD_FLAGS) == CLONE_THREAD_FLAGS,
+            SysError::Invalid,
+        )?;
         result::ensure(exit_signal == 0, SysError::Unsupported)?;
     } else {
-        result::ensure(exit_signal == 0 || exit_signal == SIGCHLD, SysError::Unsupported)?;
+        result::ensure(
+            exit_signal == 0 || exit_signal == SIGCHLD,
+            SysError::Unsupported,
+        )?;
     }
 
     let child_pml4 = if thread_clone {
@@ -815,7 +855,7 @@ unsafe fn syscall_clone_impl(
             tls,
         )
     } else {
-        proc::fork_current(child_slot, child_pml4)
+        proc::fork_current(child_slot)
     };
     if child_stack != 0 {
         let child_task = result::option(task::task_frame_mut(child_slot), SysError::Invalid)?;
@@ -853,7 +893,10 @@ pub unsafe fn syscall_futex(
 }
 
 unsafe fn syscall_futex_impl(uaddr: u64, futex_op: u64, val: u64, timeout_ptr: u64) -> SysResult {
-    result::ensure(crate::usercopy::user_range_ok(uaddr, core::mem::size_of::<u32>()), SysError::Fault)?;
+    result::ensure(
+        crate::usercopy::user_range_ok(uaddr, core::mem::size_of::<u32>()),
+        SysError::Fault,
+    )?;
     let op = futex_op & FUTEX_CMD_MASK;
     match op {
         FUTEX_WAIT => futex_wait(uaddr, val as u32, timeout_ptr),
@@ -891,7 +934,10 @@ unsafe fn syscall_get_robust_list_impl(pid: u64, head_ptr: u64, len_ptr: u64) ->
     let slot = if pid == 0 {
         result::option(task::current_task_slot(), SysError::Invalid)?
     } else {
-        result::option(proc::find_thread_slot_by_tid(pid as usize), SysError::NoEntry)?
+        result::option(
+            proc::find_thread_slot_by_tid(pid as usize),
+            SysError::NoEntry,
+        )?
     };
     let thread = result::option(proc::THREADS[slot].as_ref(), SysError::NoEntry)?;
     result::ensure(
@@ -931,15 +977,17 @@ pub unsafe fn syscall_fcntl(fd: u64, cmd: u64, arg: u64) -> u64 {
 
 unsafe fn syscall_fcntl_impl(fd: u64, cmd: u64, arg: u64) -> SysResult {
     match cmd {
-        F_DUPFD => {
-            result::ok(result::option(proc::dup_min(fd as usize, arg as usize, false), SysError::BadFd)? as u64)
+        F_DUPFD => result::ok(result::option(
+            proc::dup_min(fd as usize, arg as usize, false),
+            SysError::BadFd,
+        )? as u64),
+        F_DUPFD_CLOEXEC => result::ok(result::option(
+            proc::dup_min(fd as usize, arg as usize, true),
+            SysError::BadFd,
+        )? as u64),
+        F_GETFD => {
+            result::ok(result::option(proc::get_fd_flags(fd as usize), SysError::BadFd)? as u64)
         }
-        F_DUPFD_CLOEXEC => {
-            result::ok(result::option(proc::dup_min(fd as usize, arg as usize, true), SysError::BadFd)? as u64)
-        }
-        F_GETFD => result::ok(
-            result::option(proc::get_fd_flags(fd as usize), SysError::BadFd)? as u64,
-        ),
         F_SETFD => {
             let cloexec = (arg as u32 & proc::FD_CLOEXEC) != 0;
             result::ensure(proc::set_cloexec(fd as usize, cloexec), SysError::BadFd)?;
@@ -1005,7 +1053,10 @@ unsafe fn syscall_pipe2_impl(pipefd_ptr: u64, flags: u64) -> SysResult {
             result::ensure(proc::set_cloexec(fd, true), SysError::BadFd)?;
         }
         if (flags & O_NONBLOCK) != 0 {
-            result::ensure(proc::set_status_flags(fd, O_NONBLOCK as u32), SysError::BadFd)?;
+            result::ensure(
+                proc::set_status_flags(fd, O_NONBLOCK as u32),
+                SysError::BadFd,
+            )?;
         }
     }
     result::ok(0u64)

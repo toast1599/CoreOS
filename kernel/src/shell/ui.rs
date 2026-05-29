@@ -53,7 +53,9 @@ pub unsafe fn run_shell(boot_info: *const boot::CoreOS_BootInfo) -> ! {
                     );
                 }
             } else {
-                crate::drivers::serial::write_str("Failed to spawn userspace shell. Hitting hlt loop.\n");
+                crate::drivers::serial::write_str(
+                    "Failed to spawn userspace shell. Hitting hlt loop.\n",
+                );
                 loop {
                     core::arch::asm!("hlt");
                 }

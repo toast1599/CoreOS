@@ -34,4 +34,3 @@ pub unsafe fn pci_test() -> u64 {
     let failures = pci::pci_self_test();
     (failures as u64).into()
 }
-

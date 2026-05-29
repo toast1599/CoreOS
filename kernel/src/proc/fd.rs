@@ -4,10 +4,10 @@ mod fd_open;
 mod fd_pipe;
 
 use super::{
+    state::{OPEN_FILES, PIPES},
     DescriptorInfo, FdTarget, OpenFile, Process, FD_CLOEXEC, MAX_FDS, MAX_OPEN_FILES, MAX_PIPES,
-    OPEN_FILES, PIPES, PROCESSES, THREADS,
+    PROCESSES, THREADS,
 };
-use crate::syscall::types::{SigSet, StackT};
 
 unsafe fn alloc_open_file_with_flags(file_idx: usize, status_flags: u32) -> Option<usize> {
     fd_open::alloc(file_idx, status_flags)
@@ -38,20 +38,17 @@ pub unsafe fn release_fds(fds: &[FdTarget; MAX_FDS]) {
     }
 }
 
-pub unsafe fn fork_current(task_slot: usize, pml4: usize) -> usize {
+pub unsafe fn fork_current(task_slot: usize) -> usize {
     let pid = super::NEXT_PID.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
     let parent = super::current_process().expect("fork_current without current process");
     let parent_thread = super::current_thread().expect("fork_current without current thread");
-    let fds = parent.fds;
-    for target in fds {
+    for target in parent.fds {
         match target {
             FdTarget::Open(open_idx) if open_idx < MAX_OPEN_FILES => {
                 let mut files = OPEN_FILES.lock();
                 if files[open_idx].in_use {
                     files[open_idx].refs += 1;
                 }
-                let mut files = OPEN_FILES.lock();
-                files[open_idx].refs += 1;
             }
             FdTarget::PipeRead(pipe_idx) if pipe_idx < MAX_PIPES && PIPES[pipe_idx].in_use => {
                 PIPES[pipe_idx].read_refs += 1;
@@ -62,48 +59,16 @@ pub unsafe fn fork_current(task_slot: usize, pml4: usize) -> usize {
             _ => {}
         }
     }
-    PROCESSES[task_slot] = Some(Process {
+    PROCESSES[task_slot] = Some(Process::fork_from(parent, pid));
+    THREADS[task_slot] = Some(super::Thread::new_group_member(
         pid,
-        parent_pid: parent.pid,
-        pgid: parent.pgid,
-        sid: parent.sid,
-        state: super::ProcessState::Running,
-        leader_slot: task_slot,
-        thread_count: 1,
-        exit_code: 0,
-        uid: parent.uid,
-        euid: parent.euid,
-        gid: parent.gid,
-        egid: parent.egid,
-        umask: parent.umask,
-        exe_path: parent.exe_path,
-        exe_path_len: parent.exe_path_len,
-        program_break: parent.program_break,
-        next_mmap_base: parent.next_mmap_base,
-        pml4,
-        sig_handlers: parent.sig_handlers,
-        sig_pending: SigSet::empty(),
-        fds,
-        fd_flags: parent.fd_flags,
-        vmas: parent.vmas,
-    });
-    THREADS[task_slot] = Some(super::Thread {
-        tid: pid,
-        parent_tid: parent_thread.tid,
-        group_slot: task_slot,
+        parent_thread.tid,
         task_slot,
-        state: super::ThreadState::Running,
-        clear_child_tid: 0,
-        fs_base: parent_thread.fs_base,
-        sig_pending: SigSet::empty(),
-        sig_mask: parent_thread.sig_mask,
-        saved_sig_mask: SigSet::empty(),
-        sig_altstack: StackT::disabled(),
-        in_signal_handler: false,
-        on_altstack: false,
-        robust_list_head: 0,
-        robust_list_len: 0,
-    });
+        task_slot,
+        0,
+        parent_thread.fs_base,
+        parent_thread.sig_mask,
+    ));
     crate::dbg_log!("PROCESS", "forked pid={} at slot={}", pid, task_slot);
     pid
 }

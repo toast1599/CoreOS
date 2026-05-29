@@ -4,13 +4,7 @@ pub(super) fn alloc(file_idx: usize, status_flags: u32) -> Option<usize> {
     let mut files = super::OPEN_FILES.lock();
     for (i, of) in files.iter_mut().enumerate() {
         if !of.in_use {
-            *of = OpenFile {
-                file_idx,
-                offset: 0,
-                status_flags,
-                refs: 1,
-                in_use: true,
-            };
+            *of = OpenFile::new(file_idx, status_flags);
             return Some(i);
         }
     }

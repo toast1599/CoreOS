@@ -144,13 +144,19 @@ fn build_proc_self_exe_target() -> ([u8; helpers::MAX_PATH_LEN], usize) {
 }
 
 unsafe fn readlink_common(path: &[u8], buf_ptr: u64, buf_len: u64) -> SysResult {
-    result::ensure(crate::usercopy::user_range_ok(buf_ptr, buf_len as usize), SysError::Fault)?;
+    result::ensure(
+        crate::usercopy::user_range_ok(buf_ptr, buf_len as usize),
+        SysError::Fault,
+    )?;
     result::ensure(path == PROC_SELF_EXE, SysError::NoEntry)?;
 
     let (target, target_len) = build_proc_self_exe_target();
     result::ensure(target_len > 0, SysError::NoEntry)?;
     let count = core::cmp::min(target_len, buf_len as usize);
-    result::ensure(crate::usercopy::copy_to_user(buf_ptr, &target[..count]).is_ok(), SysError::Fault)?;
+    result::ensure(
+        crate::usercopy::copy_to_user(buf_ptr, &target[..count]).is_ok(),
+        SysError::Fault,
+    )?;
     result::ok(count as u64)
 }
 
@@ -159,7 +165,8 @@ pub unsafe fn open(path_ptr: u64, flags: u64, mode: u64) -> u64 {
 }
 
 unsafe fn open_impl(path_ptr: u64, flags: u64, _mode: u64) -> SysResult {
-    let (raw_path, raw_len) = result::option(helpers::copy_cstr_from_user(path_ptr), SysError::Fault)?;
+    let (raw_path, raw_len) =
+        result::option(helpers::copy_cstr_from_user(path_ptr), SysError::Fault)?;
     if let Some(special) = open_special_path(&raw_path[..raw_len], flags) {
         return special;
     }
@@ -171,8 +178,14 @@ unsafe fn open_impl(path_ptr: u64, flags: u64, _mode: u64) -> SysResult {
 unsafe fn open_path(path: &[char], flags: u64) -> SysResult {
     result::ensure(valid_open_flags(flags), SysError::Invalid)?;
     let accmode = flags & O_ACCMODE;
-    result::ensure(matches!(accmode, O_RDONLY | O_WRONLY | O_RDWR), SysError::Invalid)?;
-    result::ensure((flags & O_TRUNC) == 0 || accmode != O_RDONLY, SysError::Invalid)?;
+    result::ensure(
+        matches!(accmode, O_RDONLY | O_WRONLY | O_RDWR),
+        SysError::Invalid,
+    )?;
+    result::ensure(
+        (flags & O_TRUNC) == 0 || accmode != O_RDONLY,
+        SysError::Invalid,
+    )?;
 
     let mut file_idx = super::fs::fs_find_idx(path);
     if file_idx.is_none() {
@@ -249,7 +262,10 @@ unsafe fn fstat_impl(fd: u64, stat_ptr: u64) -> SysResult {
         },
     };
 
-    result::ensure(helpers::copy_struct_to_user(stat_ptr, &stat), SysError::Fault)?;
+    result::ensure(
+        helpers::copy_struct_to_user(stat_ptr, &stat),
+        SysError::Fault,
+    )?;
     result::ok(0u64)
 }
 
@@ -260,12 +276,16 @@ pub unsafe fn fstatat(dirfd: u64, path_ptr: u64, stat_ptr: u64, flags: u64) -> u
 unsafe fn fstatat_impl(dirfd: u64, path_ptr: u64, stat_ptr: u64, flags: u64) -> SysResult {
     result::ensure(dirfd as i64 == AT_FDCWD, SysError::Unsupported)?;
     result::ensure(flags == 0, SysError::Unsupported)?;
-    let (raw_path, raw_len) = result::option(helpers::copy_cstr_from_user(path_ptr), SysError::Fault)?;
+    let (raw_path, raw_len) =
+        result::option(helpers::copy_cstr_from_user(path_ptr), SysError::Fault)?;
     if matches!(
         &raw_path[..raw_len],
         DEV_NULL | DEV_ZERO | DEV_TTY | DEV_STDIN | DEV_STDOUT | DEV_STDERR
     ) {
-        result::ensure(helpers::copy_struct_to_user(stat_ptr, &char_stat()), SysError::Fault)?;
+        result::ensure(
+            helpers::copy_struct_to_user(stat_ptr, &char_stat()),
+            SysError::Fault,
+        )?;
         return result::ok(0u64);
     }
     if &raw_path[..raw_len] == PROC_SELF_EXE {
@@ -275,16 +295,28 @@ unsafe fn fstatat_impl(dirfd: u64, path_ptr: u64, stat_ptr: u64, flags: u64) -> 
         for (dst, src) in name_buf.iter_mut().zip(exe_path.iter()).take(exe_len) {
             *dst = *src as char;
         }
-        let file_idx = result::option(super::fs::fs_find_idx(&name_buf[..exe_len]), SysError::NoEntry)?;
+        let file_idx = result::option(
+            super::fs::fs_find_idx(&name_buf[..exe_len]),
+            SysError::NoEntry,
+        )?;
         let stat = stat_for_file_idx(file_idx, super::fs::fs_file_size(file_idx) as i64);
-        result::ensure(helpers::copy_struct_to_user(stat_ptr, &stat), SysError::Fault)?;
+        result::ensure(
+            helpers::copy_struct_to_user(stat_ptr, &stat),
+            SysError::Fault,
+        )?;
         return result::ok(0u64);
     }
     let (name_buf, name_len) =
         result::option(helpers::copy_path_cstr_from_user(path_ptr), SysError::Fault)?;
-    let file_idx = result::option(super::fs::fs_find_idx(&name_buf[..name_len]), SysError::NoEntry)?;
+    let file_idx = result::option(
+        super::fs::fs_find_idx(&name_buf[..name_len]),
+        SysError::NoEntry,
+    )?;
     let stat = stat_for_file_idx(file_idx, super::fs::fs_file_size(file_idx) as i64);
-    result::ensure(helpers::copy_struct_to_user(stat_ptr, &stat), SysError::Fault)?;
+    result::ensure(
+        helpers::copy_struct_to_user(stat_ptr, &stat),
+        SysError::Fault,
+    )?;
     result::ok(0u64)
 }
 
@@ -295,9 +327,13 @@ pub unsafe fn faccessat(dirfd: u64, path_ptr: u64, mode: u64, flags: u64) -> u64
 unsafe fn faccessat_impl(dirfd: u64, path_ptr: u64, mode: u64, flags: u64) -> SysResult {
     result::ensure(dirfd as i64 == AT_FDCWD, SysError::Unsupported)?;
     result::ensure(flags == 0, SysError::Unsupported)?;
-    result::ensure(mode & !(R_OK | W_OK | X_OK) == 0 || mode == F_OK, SysError::Invalid)?;
+    result::ensure(
+        mode & !(R_OK | W_OK | X_OK) == 0 || mode == F_OK,
+        SysError::Invalid,
+    )?;
 
-    let (raw_path, raw_len) = result::option(helpers::copy_cstr_from_user(path_ptr), SysError::Fault)?;
+    let (raw_path, raw_len) =
+        result::option(helpers::copy_cstr_from_user(path_ptr), SysError::Fault)?;
     if matches!(
         &raw_path[..raw_len],
         DEV_NULL | DEV_ZERO | DEV_TTY | DEV_STDIN | DEV_STDOUT | DEV_STDERR | PROC_SELF_EXE
@@ -312,8 +348,10 @@ unsafe fn faccessat_impl(dirfd: u64, path_ptr: u64, mode: u64, flags: u64) -> Sy
 
     let (name_buf, name_len) =
         result::option(helpers::copy_path_cstr_from_user(path_ptr), SysError::Fault)?;
-    let _file_idx =
-        result::option(super::fs::fs_find_idx(&name_buf[..name_len]), SysError::NoEntry)?;
+    let _file_idx = result::option(
+        super::fs::fs_find_idx(&name_buf[..name_len]),
+        SysError::NoEntry,
+    )?;
 
     result::ensure(mode & X_OK == 0, SysError::Access)?;
     result::ok(0u64)
@@ -325,9 +363,10 @@ pub unsafe fn lseek(fd: u64, offset: u64, whence: u64) -> u64 {
 
 unsafe fn lseek_impl(fd: u64, offset: u64, whence: u64) -> SysResult {
     match result::option(proc::descriptor_info(fd as usize), SysError::BadFd)? {
-        DescriptorInfo::File { .. } => {
-            result::ok(result::option(proc::seek(fd as usize, offset as i64, whence), SysError::Invalid)?)
-        }
+        DescriptorInfo::File { .. } => result::ok(result::option(
+            proc::seek(fd as usize, offset as i64, whence),
+            SysError::Invalid,
+        )?),
         DescriptorInfo::Pipe | DescriptorInfo::Stdio { .. } | DescriptorInfo::CharDevice => {
             result::err(SysError::NotSeekable)
         }
@@ -341,9 +380,14 @@ pub unsafe fn truncate(path_ptr: u64, len: u64) -> u64 {
 unsafe fn truncate_impl(path_ptr: u64, len: u64) -> SysResult {
     let (name_buf, name_len) =
         result::option(helpers::copy_path_cstr_from_user(path_ptr), SysError::Fault)?;
-    let file_idx =
-        result::option(super::fs::fs_find_idx(&name_buf[..name_len]), SysError::NoEntry)?;
-    result::ensure(super::fs::fs_resize(file_idx, len as usize), SysError::Invalid)?;
+    let file_idx = result::option(
+        super::fs::fs_find_idx(&name_buf[..name_len]),
+        SysError::NoEntry,
+    )?;
+    result::ensure(
+        super::fs::fs_resize(file_idx, len as usize),
+        SysError::Invalid,
+    )?;
     result::ok(0u64)
 }
 
@@ -357,7 +401,10 @@ unsafe fn ftruncate_impl(fd: u64, len: u64) -> SysResult {
     else {
         return result::err(SysError::Invalid);
     };
-    result::ensure(super::fs::fs_resize(file_idx, len as usize), SysError::Invalid)?;
+    result::ensure(
+        super::fs::fs_resize(file_idx, len as usize),
+        SysError::Invalid,
+    )?;
     result::ok(0u64)
 }
 
@@ -366,7 +413,10 @@ pub unsafe fn ls(buf_ptr: u64, buf_len: u64) -> u64 {
 }
 
 unsafe fn ls_impl(buf_ptr: u64, buf_len: u64) -> SysResult {
-    result::ensure(crate::usercopy::user_range_ok(buf_ptr, buf_len as usize), SysError::Fault)?;
+    result::ensure(
+        crate::usercopy::user_range_ok(buf_ptr, buf_len as usize),
+        SysError::Fault,
+    )?;
     let files = crate::vfs::list().unwrap_or_default();
     let buf = buf_ptr as *mut u8;
     let buf_len = buf_len as usize;
@@ -429,8 +479,10 @@ pub unsafe fn touch(name_ptr: u64, name_len: u64) -> u64 {
 }
 
 unsafe fn touch_impl(name_ptr: u64, name_len: u64) -> SysResult {
-    let (name_buf, name_len) =
-        result::option(helpers::copy_path_from_user(name_ptr, name_len), SysError::Fault)?;
+    let (name_buf, name_len) = result::option(
+        helpers::copy_path_from_user(name_ptr, name_len),
+        SysError::Fault,
+    )?;
     result::ensure(crate::vfs::create(&name_buf[..name_len]), SysError::Invalid)?;
     result::ok(0u64)
 }
@@ -440,8 +492,10 @@ pub unsafe fn rm(name_ptr: u64, name_len: u64) -> u64 {
 }
 
 unsafe fn rm_impl(name_ptr: u64, name_len: u64) -> SysResult {
-    let (name_buf, name_len) =
-        result::option(helpers::copy_path_from_user(name_ptr, name_len), SysError::Fault)?;
+    let (name_buf, name_len) = result::option(
+        helpers::copy_path_from_user(name_ptr, name_len),
+        SysError::Fault,
+    )?;
     result::ensure(crate::vfs::remove(&name_buf[..name_len]), SysError::NoEntry)?;
     result::ok(0u64)
 }
@@ -455,7 +509,8 @@ unsafe fn unlinkat_impl(dirfd: u64, path_ptr: u64, path_len: u64, flags: u64) ->
     result::ensure(flags == 0 || flags == AT_REMOVEDIR, SysError::Invalid)?;
     result::ensure(flags & AT_REMOVEDIR == 0, SysError::Unsupported)?;
     let _ = path_len;
-    let (raw_path, raw_len) = result::option(helpers::copy_cstr_from_user(path_ptr), SysError::Fault)?;
+    let (raw_path, raw_len) =
+        result::option(helpers::copy_cstr_from_user(path_ptr), SysError::Fault)?;
     if matches!(
         &raw_path[..raw_len],
         DEV_NULL | DEV_ZERO | DEV_TTY | DEV_STDIN | DEV_STDOUT | DEV_STDERR | PROC_SELF_EXE
@@ -492,12 +547,17 @@ pub unsafe fn write_file(name_ptr: u64, name_len: u64, args_ptr: u64) -> u64 {
 }
 
 unsafe fn write_file_impl(name_ptr: u64, name_len: u64, args_ptr: u64) -> SysResult {
-    let (name_buf, name_len) =
-        result::option(helpers::copy_path_from_user(name_ptr, name_len), SysError::Fault)?;
+    let (name_buf, name_len) = result::option(
+        helpers::copy_path_from_user(name_ptr, name_len),
+        SysError::Fault,
+    )?;
     let (data_ptr, data_len) = result::option(copy_file_payload_args(args_ptr), SysError::Fault)?;
 
     let src = core::slice::from_raw_parts(data_ptr as *const u8, data_len);
-    result::ensure(crate::vfs::replace_all(&name_buf[..name_len], src), SysError::NoEntry)?;
+    result::ensure(
+        crate::vfs::replace_all(&name_buf[..name_len], src),
+        SysError::NoEntry,
+    )?;
     result::ok(0u64)
 }
 
@@ -506,11 +566,16 @@ pub unsafe fn push_file(name_ptr: u64, name_len: u64, args_ptr: u64) -> u64 {
 }
 
 unsafe fn push_file_impl(name_ptr: u64, name_len: u64, args_ptr: u64) -> SysResult {
-    let (name_buf, name_len) =
-        result::option(helpers::copy_path_from_user(name_ptr, name_len), SysError::Fault)?;
+    let (name_buf, name_len) = result::option(
+        helpers::copy_path_from_user(name_ptr, name_len),
+        SysError::Fault,
+    )?;
     let (data_ptr, data_len) = result::option(copy_file_payload_args(args_ptr), SysError::Fault)?;
 
     let src = core::slice::from_raw_parts(data_ptr as *const u8, data_len);
-    result::ensure(crate::vfs::append_all(&name_buf[..name_len], src), SysError::NoEntry)?;
+    result::ensure(
+        crate::vfs::append_all(&name_buf[..name_len], src),
+        SysError::NoEntry,
+    )?;
     result::ok(0u64)
 }

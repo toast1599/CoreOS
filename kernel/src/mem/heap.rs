@@ -157,10 +157,9 @@ unsafe impl GlobalAlloc for SlabAllocator {
             let addr_phys = crate::arch::amd64::paging::v2p(addr_virt);
             let irq_was_enabled = interrupts_enabled();
             core::arch::asm!("cli", options(nomem, nostack));
-            if let Some(slab) = SLABS[ci]
-                .iter_mut()
-                .find(|h| !h.is_empty_slot() && addr_phys >= h.page && addr_phys < h.page + PAGE_SIZE)
-            {
+            if let Some(slab) = SLABS[ci].iter_mut().find(|h| {
+                !h.is_empty_slot() && addr_phys >= h.page && addr_phys < h.page + PAGE_SIZE
+            }) {
                 (addr_virt as *mut usize).write(slab.free_head);
                 slab.free_head = addr_virt;
                 slab.free_count += 1;

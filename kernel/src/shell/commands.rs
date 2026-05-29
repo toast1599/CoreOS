@@ -215,14 +215,12 @@ fn cmd_sleep(buf: &[char; BUF_LEN]) -> ShellOutput {
 
 fn cmd_font(buf: &[char; BUF_LEN], ctx: &mut ShellContext) -> ShellOutput {
     match buf[5] {
-        '+'
-            if *ctx.global_scale < 4 => {
-                *ctx.global_scale += 1;
-            }
-        '-'
-            if *ctx.global_scale > 1 => {
-                *ctx.global_scale -= 1;
-            }
+        '+' if *ctx.global_scale < 4 => {
+            *ctx.global_scale += 1;
+        }
+        '-' if *ctx.global_scale > 1 => {
+            *ctx.global_scale -= 1;
+        }
         _ => {}
     }
     ShellOutput::None

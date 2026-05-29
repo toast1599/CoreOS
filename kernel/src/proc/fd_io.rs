@@ -1,5 +1,3 @@
-use crate::drivers::serial;
-use crate::drivers::vga;
 use crate::hw::tty;
 use crate::proc;
 use crate::proc::FdTarget;

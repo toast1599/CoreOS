@@ -36,7 +36,11 @@ pub unsafe fn fs_read(file_idx: usize, offset: usize, buf: *mut u8, count: usize
     to_read
 }
 
-pub unsafe fn fs_read_to_vec(file_idx: usize, offset: usize, count: usize) -> Option<alloc::vec::Vec<u8>> {
+pub unsafe fn fs_read_to_vec(
+    file_idx: usize,
+    offset: usize,
+    count: usize,
+) -> Option<alloc::vec::Vec<u8>> {
     let fs_guard = crate::fs::FILESYSTEM.lock();
     let fs = fs_guard.as_ref()?;
     if file_idx >= fs.files.len() {

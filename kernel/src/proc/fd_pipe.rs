@@ -1,4 +1,4 @@
-use super::super::{Pipe, MAX_PIPES, PIPE_CAPACITY};
+use super::super::{state::PIPE_CAPACITY, Pipe, MAX_PIPES};
 
 const PIPE_WAIT_SPINS: usize = 2000;
 
@@ -154,17 +154,7 @@ pub(super) unsafe fn read(fd: usize, buf: *mut u8, count: usize) -> Option<usize
 
 pub(super) unsafe fn alloc() -> Option<usize> {
     let pipe_idx = super::PIPES.iter().position(|p| !p.in_use)?;
-    super::PIPES[pipe_idx] = Pipe {
-        buf: [0; PIPE_CAPACITY],
-        read_pos: 0,
-        write_pos: 0,
-        len: 0,
-        read_refs: 1,
-        write_refs: 1,
-        read_flags: 0,
-        write_flags: 0,
-        in_use: true,
-    };
+    super::PIPES[pipe_idx] = Pipe::new();
     Some(pipe_idx)
 }
 

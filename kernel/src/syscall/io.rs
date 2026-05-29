@@ -37,12 +37,7 @@ pub unsafe fn read(fd: u64, buf_ptr: u64, count: u64) -> u64 {
 
 unsafe fn read_impl(fd: u64, buf_ptr: u64, count: u64) -> SysResult {
     let count = count as usize;
-    crate::serial_fmt!(
-        "[SYS_READ] fd={} buf={:#x} count={}\n",
-        fd,
-        buf_ptr,
-        count
-    );
+    crate::serial_fmt!("[SYS_READ] fd={} buf={:#x} count={}\n", fd, buf_ptr, count);
     result::ensure(
         crate::usercopy::user_range_ok(buf_ptr, count),
         SysError::Fault,

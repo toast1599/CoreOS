@@ -289,4 +289,3 @@ fn map_alpha(sc: u8) -> char {
         _ => '\0',
     }
 }
-

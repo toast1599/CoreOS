@@ -61,4 +61,3 @@ pub unsafe fn pop_cli(was_enabled: bool) {
         sti();
     }
 }
-

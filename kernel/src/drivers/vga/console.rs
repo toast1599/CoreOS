@@ -1,7 +1,10 @@
+use super::{
+    draw_rect_raw, putchar_raw, BG_COLOR, FB_BASE, FB_HEIGHT, FB_PITCH, FB_WIDTH, FONT_BASE,
+    TEXT_COLOR,
+};
+use crate::boot::CoreOS_BootInfo;
 use core::fmt::Write;
 use core::sync::atomic::{AtomicUsize, Ordering};
-use crate::boot::CoreOS_BootInfo;
-use super::{FB_BASE, FB_PITCH, FB_WIDTH, FB_HEIGHT, FONT_BASE, BG_COLOR, TEXT_COLOR, putchar_raw, draw_rect_raw};
 
 // ---------------------------------------------------------------------------
 // Global output cursor — shared between kernel and userspace output path.

@@ -19,8 +19,11 @@ pub static IN_SYSCALL: AtomicBool = AtomicBool::new(false);
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Voluntarily yield the CPU to the next task.
 pub fn yield_now() {
+    unsafe {
+        disable_interrupts();
+    }
+
     let prev = IN_SYSCALL.swap(false, Ordering::Relaxed);
 
     unsafe {
@@ -28,6 +31,10 @@ pub fn yield_now() {
     }
 
     IN_SYSCALL.store(prev, Ordering::Relaxed);
+
+    unsafe {
+        enable_interrupts();
+    }
 }
 
 /// Wait while allowing interrupts (used for blocking-style waits).

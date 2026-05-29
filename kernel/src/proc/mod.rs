@@ -1,248 +1,38 @@
+//! Process subsystem.
+//!
+//! The `proc` tree owns three related concerns:
+//! - lifecycle and lookup for processes and threads
+//! - scheduler task integration
+//! - per-process resources such as file descriptors and VM regions
+//!
+//! This module is intentionally a thin facade. Concrete state lives in
+//! [`state`], while the child modules implement specific behaviors.
+
 pub mod elf;
 pub mod exec;
 mod fd;
 pub mod fd_io;
 mod process;
 pub mod scheduler;
+pub mod state;
 pub mod task;
 mod vm;
 
-use crate::syscall::types::{SigAction, SigSet, StackT};
-use core::sync::atomic::AtomicUsize;
-use spin::Mutex; // CRUCIAL
-
-// ---------------------------------------------------------------------------
-// File descriptor table
-// ---------------------------------------------------------------------------
-
-/// Max file descriptors per process, including stdin/stdout/stderr.
-pub const MAX_FDS: usize = 16;
-pub const MAX_OPEN_FILES: usize = 32;
-pub const MAX_PIPES: usize = 16;
-pub const MAX_VMAS: usize = 32;
-pub const EXE_PATH_MAX: usize = 64;
-pub const MMAP_BASE: usize = 0x0000_0001_0000_0000;
-pub const FD_CLOEXEC: u32 = 1;
-pub const O_ACCMODE: u32 = 0o3;
-pub const O_RDONLY: u32 = 0o0;
-pub const O_WRONLY: u32 = 0o1;
-pub const O_RDWR: u32 = 0o2;
-pub const O_CREAT: u32 = 0o100;
-pub const O_EXCL: u32 = 0o200;
-pub const O_TRUNC: u32 = 0o1000;
-pub const O_APPEND: u32 = 0o2000;
-pub const O_NONBLOCK: u32 = 0o4000;
-const PIPE_CAPACITY: usize = 1024;
-
-/// A shared open file description pointing into RamFS.
-#[derive(Clone, Copy)]
-pub struct OpenFile {
-    /// Index into RamFS.files
-    pub file_idx: usize,
-    /// Read cursor (byte offset)
-    pub offset: usize,
-    /// Open-file status flags shared by dup'd descriptors.
-    pub status_flags: u32,
-    /// Number of descriptors referencing this open file description.
-    pub refs: usize,
-    pub in_use: bool,
-}
-
-impl OpenFile {
-    pub const fn empty() -> Self {
-        Self {
-            file_idx: 0,
-            offset: 0,
-            status_flags: 0,
-            refs: 0,
-            in_use: false,
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-pub enum FdTarget {
-    Empty,
-    Stdio(u8),
-    Tty,
-    Null,
-    Zero,
-    Open(usize),
-    PipeRead(usize),
-    PipeWrite(usize),
-}
-
-#[derive(Clone, Copy)]
-pub enum DescriptorInfo {
-    Stdio { index: u8 },
-    CharDevice,
-    File { file_idx: usize, size: usize },
-    Pipe,
-}
-
-#[derive(Clone, Copy)]
-pub struct Pipe {
-    pub buf: [u8; PIPE_CAPACITY],
-    pub read_pos: usize,
-    pub write_pos: usize,
-    pub len: usize,
-    pub read_refs: usize,
-    pub write_refs: usize,
-    pub read_flags: u32,
-    pub write_flags: u32,
-    pub in_use: bool,
-}
-
-impl Pipe {
-    pub const fn empty() -> Self {
-        Self {
-            buf: [0; PIPE_CAPACITY],
-            read_pos: 0,
-            write_pos: 0,
-            len: 0,
-            read_refs: 0,
-            write_refs: 0,
-            read_flags: 0,
-            write_flags: 0,
-            in_use: false,
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-pub struct VmRegion {
-    pub start: usize,
-    pub len: usize,
-    pub prot: u32,
-    #[allow(dead_code)]
-    pub flags: u32,
-    pub in_use: bool,
-}
-
-impl VmRegion {
-    pub const fn empty() -> Self {
-        Self {
-            start: 0,
-            len: 0,
-            prot: 0,
-            flags: 0,
-            in_use: false,
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Process state
-// ---------------------------------------------------------------------------
-
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum ProcessState {
-    /// Process is alive and scheduled.
-    Running,
-    /// Process called exit() — waiting for shell to reap.
-    Zombie,
-}
-
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum ThreadState {
-    Running,
-    Zombie,
-}
-
-#[derive(Clone, Copy)]
-pub struct Thread {
-    pub tid: usize,
-    #[allow(dead_code)]
-    pub parent_tid: usize,
-    pub group_slot: usize,
-    pub task_slot: usize,
-    pub state: ThreadState,
-    pub clear_child_tid: u64,
-    pub fs_base: u64,
-    pub sig_pending: SigSet,
-    pub sig_mask: SigSet,
-    pub saved_sig_mask: SigSet,
-    pub sig_altstack: StackT,
-    pub in_signal_handler: bool,
-    pub on_altstack: bool,
-    pub robust_list_head: u64,
-    pub robust_list_len: usize,
-}
-
-// ---------------------------------------------------------------------------
-// Process descriptor
-// ---------------------------------------------------------------------------
-
-#[allow(dead_code)]
-
-pub struct Process {
-    pub pid: usize,
-    pub parent_pid: usize,
-    pub pgid: usize,
-    pub sid: usize,
-    pub state: ProcessState,
-    pub leader_slot: usize,
-    pub thread_count: usize,
-    pub exit_code: i64,
-    pub uid: u32,
-    pub euid: u32,
-    pub gid: u32,
-    pub egid: u32,
-    pub umask: u32,
-    pub exe_path: [u8; EXE_PATH_MAX],
-    pub exe_path_len: usize,
-    pub program_break: usize,
-    pub next_mmap_base: usize,
-    pub pml4: usize,
-    pub sig_handlers: [SigAction; 65],
-    pub sig_pending: SigSet,
-    /// Per-process file descriptor table. 0/1/2 start as stdin/stdout/stderr.
-    pub fds: [FdTarget; MAX_FDS],
-    pub fd_flags: [u32; MAX_FDS],
-    pub vmas: [VmRegion; MAX_VMAS],
-}
-
-// ---------------------------------------------------------------------------
-// Process table
-// ---------------------------------------------------------------------------
-
-static NEXT_PID: AtomicUsize = AtomicUsize::new(1);
-
-/// The process table. Indexed by task slot (matching Task array in task.rs).
-pub static mut PROCESSES: [Option<Process>; 8] = [None, None, None, None, None, None, None, None];
-pub static mut THREADS: [Option<Thread>; 8] = [None, None, None, None, None, None, None, None];
-
-static OPEN_FILES: Mutex<[OpenFile; MAX_OPEN_FILES]> =
-    Mutex::new([OpenFile::empty(); MAX_OPEN_FILES]);
-static mut PIPES: [Pipe; MAX_PIPES] = [Pipe::empty(); MAX_PIPES];
-
-fn default_fds() -> [FdTarget; MAX_FDS] {
-    let mut fds = [FdTarget::Empty; MAX_FDS];
-    fds[0] = FdTarget::Stdio(0);
-    fds[1] = FdTarget::Stdio(1);
-    fds[2] = FdTarget::Stdio(2);
-    fds
-}
-
-fn default_fd_flags() -> [u32; MAX_FDS] {
-    [0; MAX_FDS]
-}
-
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
-
 pub use fd::{
-    close_descriptor, create_pipe_pair, dup_exact, dup_min, fork_current, get_fd_flags,
-    get_fd_target, get_status_flags, is_stdin, is_stdout_or_stderr, open_char_device, open_file,
-    read_file, read_pipe, reap_slot, seek, set_cloexec, set_status_flags, with_fd_mut, write_file,
-    write_pipe,
+    close_descriptor, create_pipe_pair, descriptor_info, dup_exact, dup_min, file_size,
+    fork_current, get_fd_flags, get_fd_target, get_status_flags, is_stdin, is_stdout_or_stderr,
+    open_char_device, open_file, read_file, read_pipe, reap_slot, seek, set_cloexec,
+    set_status_flags, with_fd_mut, write_file, write_pipe,
 };
-pub use fd::{descriptor_info, file_size};
 pub use process::{
     active_process_count, current_brk, current_exe_path, current_fs_base, current_pid,
     current_ppid, current_process, current_process_mut, current_thread, current_thread_mut,
     current_tid, exit, exit_thread, find_slot_by_pid, find_thread_slot_by_tid, is_running_in_slot,
     set_brk, spawn_named, spawn_thread_in_group, task_slot_reaped,
+};
+pub use state::{
+    DescriptorInfo, FdTarget, OpenFile, Pipe, Process, ProcessState, Thread, ThreadState, VmRegion,
+    EXE_PATH_MAX, FD_CLOEXEC, MAX_FDS, MAX_OPEN_FILES, MAX_PIPES, NEXT_PID, O_ACCMODE, O_APPEND,
+    O_CREAT, O_EXCL, O_NONBLOCK, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY, PROCESSES, THREADS,
 };
 pub use vm::{alloc_vma, find_vma_exact_mut, region_conflicts, reserve_mmap_base};

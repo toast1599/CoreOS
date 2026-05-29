@@ -31,4 +31,3 @@ macro_rules! serial_fmt {
         let _ = core::write!(w, $($arg)*);
     }};
 }
-

@@ -270,4 +270,3 @@ pub fn free_bytes() -> usize {
 pub fn total_bytes() -> usize {
     PMM.lock().total_frames * PAGE_SIZE
 }
-

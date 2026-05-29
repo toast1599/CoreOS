@@ -119,7 +119,10 @@ unsafe fn clock_nanosleep_impl(clockid: u64, flags: u64, req_ptr: u64, rem_ptr: 
     let now_ns = (now.tv_sec as i128) * (NANOS_PER_SEC as i128) + (now.tv_nsec as i128);
     if req_ns <= now_ns {
         if rem_ptr != 0 {
-            let rem = Timespec { tv_sec: 0, tv_nsec: 0 };
+            let rem = Timespec {
+                tv_sec: 0,
+                tv_nsec: 0,
+            };
             result::ensure(helpers::copy_struct_to_user(rem_ptr, &rem), SysError::Fault)?;
         }
         return result::ok(0u64);

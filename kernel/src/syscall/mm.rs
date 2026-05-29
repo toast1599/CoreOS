@@ -62,7 +62,14 @@ unsafe fn brk_impl(addr: u64) -> SysResult {
 }
 
 pub unsafe fn mmap(addr: u64, len: u64, prot: u64, flags: u64, fd: u64, off: u64) -> u64 {
-    result::ret(mmap_impl(addr, len, prot as u32, flags as u32, fd as i32, off as i64))
+    result::ret(mmap_impl(
+        addr,
+        len,
+        prot as u32,
+        flags as u32,
+        fd as i32,
+        off as i64,
+    ))
 }
 
 unsafe fn mmap_impl(addr: u64, len: u64, prot: u32, flags: u32, fd: i32, off: i64) -> SysResult {

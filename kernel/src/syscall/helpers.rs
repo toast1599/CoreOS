@@ -35,7 +35,10 @@ fn normalize_path_bytes(raw: &[u8]) -> Option<([char; MAX_PATH_LEN], usize)> {
     }
 }
 
-pub unsafe fn copy_path_from_user(path_ptr: u64, path_len: u64) -> Option<([char; MAX_PATH_LEN], usize)> {
+pub unsafe fn copy_path_from_user(
+    path_ptr: u64,
+    path_len: u64,
+) -> Option<([char; MAX_PATH_LEN], usize)> {
     if path_len == 0 || path_len as usize > MAX_PATH_LEN {
         return None;
     }
@@ -82,14 +85,15 @@ pub unsafe fn copy_struct_to_user<T>(user_ptr: u64, value: &T) -> bool {
         return false;
     }
 
-    let bytes = core::slice::from_raw_parts(
-        (value as *const T).cast::<u8>(),
-        core::mem::size_of::<T>(),
-    );
+    let bytes =
+        core::slice::from_raw_parts((value as *const T).cast::<u8>(), core::mem::size_of::<T>());
     crate::usercopy::copy_to_user(user_ptr, bytes).is_ok()
 }
 
-pub unsafe fn copy_iovecs_from_user(iov_ptr: u64, iovcnt: u64) -> Option<([Iovec; MAX_IOV], usize)> {
+pub unsafe fn copy_iovecs_from_user(
+    iov_ptr: u64,
+    iovcnt: u64,
+) -> Option<([Iovec; MAX_IOV], usize)> {
     let count = iovcnt as usize;
     if count == 0 || count > MAX_IOV {
         return None;

@@ -1,66 +1,20 @@
 use core::sync::atomic::Ordering;
-use crate::syscall::types::{SigAction, SigSet, StackT};
 
-use super::{
-    default_fd_flags, default_fds, task, Process, ProcessState, Thread, ThreadState, VmRegion,
-    MMAP_BASE, NEXT_PID, PROCESSES, THREADS,
-};
+use super::{task, Process, ProcessState, Thread, ThreadState, NEXT_PID, PROCESSES, THREADS};
 
 #[allow(dead_code)]
-pub unsafe fn spawn(task_slot: usize, pml4: usize) -> usize {
-    spawn_named(task_slot, pml4, &[])
+pub unsafe fn spawn(task_slot: usize) -> usize {
+    spawn_named(task_slot, &[])
 }
 
-pub unsafe fn spawn_named(task_slot: usize, pml4: usize, name: &[char]) -> usize {
+/// Create a new thread-group leader in the given scheduler slot.
+pub unsafe fn spawn_named(task_slot: usize, name: &[char]) -> usize {
     let pid = NEXT_PID.fetch_add(1, Ordering::Relaxed);
     let parent_pid = current_pid();
-    let mut exe_path = [0u8; super::EXE_PATH_MAX];
-    let exe_path_len = name.len().min(super::EXE_PATH_MAX);
-    for (i, ch) in name.iter().take(exe_path_len).enumerate() {
-        exe_path[i] = *ch as u8;
-    }
-    PROCESSES[task_slot] = Some(Process {
-        pid,
-        parent_pid,
-        pgid: pid,
-        sid: pid,
-        state: ProcessState::Running,
-        leader_slot: task_slot,
-        thread_count: 1,
-        exit_code: 0,
-        uid: 0,
-        euid: 0,
-        gid: 0,
-        egid: 0,
-        umask: 0o022,
-        exe_path,
-        exe_path_len,
-        program_break: 0x4000_0000,
-        next_mmap_base: MMAP_BASE,
-        pml4,
-        sig_handlers: [SigAction::empty(); 65],
-        sig_pending: SigSet::empty(),
-        fds: default_fds(),
-        fd_flags: default_fd_flags(),
-        vmas: [VmRegion::empty(); super::MAX_VMAS],
-    });
-    THREADS[task_slot] = Some(Thread {
-        tid: pid,
-        parent_tid: parent_pid,
-        group_slot: task_slot,
-        task_slot,
-        state: ThreadState::Running,
-        clear_child_tid: 0,
-        fs_base: 0,
-        sig_pending: SigSet::empty(),
-        sig_mask: SigSet::empty(),
-        saved_sig_mask: SigSet::empty(),
-        sig_altstack: StackT::disabled(),
-        in_signal_handler: false,
-        on_altstack: false,
-        robust_list_head: 0,
-        robust_list_len: 0,
-    });
+
+    PROCESSES[task_slot] = Some(Process::new_leader(pid, parent_pid, name));
+    THREADS[task_slot] = Some(Thread::new_leader(pid, parent_pid, task_slot, task_slot));
+
     crate::dbg_log!("PROCESS", "spawned pid={} at slot={}", pid, task_slot);
     pid
 }
@@ -126,10 +80,12 @@ pub unsafe fn current_process() -> Option<&'static Process> {
     PROCESSES[group_slot].as_ref()
 }
 
+/// Exit the current thread and mark the process zombie if this was its last thread.
 pub unsafe fn exit(code: i64) {
     let _ = exit_thread(code, false);
 }
 
+/// Exit the current thread and optionally tear down the whole thread group.
 pub unsafe fn exit_thread(code: i64, whole_group: bool) -> bool {
     let Some(thread) = current_thread_mut() else {
         return false;
@@ -237,22 +193,14 @@ pub unsafe fn spawn_thread_in_group(task_slot: usize, clear_child_tid: u64, fs_b
         .as_mut()
         .expect("spawn_thread_in_group without process");
     process.thread_count += 1;
-    THREADS[task_slot] = Some(Thread {
+    THREADS[task_slot] = Some(Thread::new_group_member(
         tid,
-        parent_tid: current.tid,
+        current.tid,
         group_slot,
         task_slot,
-        state: ThreadState::Running,
         clear_child_tid,
         fs_base,
-        sig_pending: SigSet::empty(),
-        sig_mask: current.sig_mask,
-        saved_sig_mask: SigSet::empty(),
-        sig_altstack: StackT::disabled(),
-        in_signal_handler: false,
-        on_altstack: false,
-        robust_list_head: 0,
-        robust_list_len: 0,
-    });
+        current.sig_mask,
+    ));
     tid
 }

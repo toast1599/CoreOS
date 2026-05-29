@@ -285,9 +285,8 @@ extern "C" {
 static EXCEPTION_STUBS: [unsafe extern "C" fn(); 32] = [
     exc0_stub, exc1_stub, exc2_stub, exc3_stub, exc4_stub, exc5_stub, exc6_stub, exc7_stub,
     exc8_stub, exc9_stub, exc10_stub, exc11_stub, exc12_stub, exc13_stub, exc14_stub, exc15_stub,
-    exc16_stub, exc17_stub, exc18_stub, exc19_stub, exc20_stub, exc21_stub, exc22_stub,
-    exc23_stub, exc24_stub, exc25_stub, exc26_stub, exc27_stub, exc28_stub, exc29_stub,
-    exc30_stub, exc31_stub,
+    exc16_stub, exc17_stub, exc18_stub, exc19_stub, exc20_stub, exc21_stub, exc22_stub, exc23_stub,
+    exc24_stub, exc25_stub, exc26_stub, exc27_stub, exc28_stub, exc29_stub, exc30_stub, exc31_stub,
 ];
 
 // ---------------------------------------------------------------------------
