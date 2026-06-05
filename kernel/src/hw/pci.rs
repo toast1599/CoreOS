@@ -7,7 +7,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use crate::sync::SpinLock;
 
 // ---------------------------------------------------------------------------
-// Port I/O — unsafe helpers
+// Port I/O - unsafe helpers
 // ---------------------------------------------------------------------------
 
 const CONFIG_ADDRESS: u16 = 0xCF8;

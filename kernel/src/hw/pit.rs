@@ -1,4 +1,4 @@
-/// PIT (8253/8254) driver — 100 Hz timer.
+/// PIT (8253/8254) driver - 100 Hz timer.
 ///
 /// `TICKS` is the single authoritative tick counter for the whole kernel.
 /// `scheduler::tick()` is called from the interrupt handler here; the
@@ -15,7 +15,7 @@ pub fn ticks() -> u64 {
     TICKS.load(Ordering::Relaxed)
 }
 
-/// PIT interrupt handler — called from the `pit_interrupt` ASM stub in idt.rs.
+/// PIT interrupt handler - called from the `pit_interrupt` ASM stub in idt.rs.
 /// Sends EOI to the PIC, then increments the tick counter and runs the scheduler.
 #[no_mangle]
 pub extern "C" fn pit_handler(_stack: *mut u8) {

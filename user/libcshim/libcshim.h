@@ -333,12 +333,12 @@ static inline void sigaddset(sigset_t *set, int sig) {
 // Syscall interface
 // ---------------------------------------------------------------------------
 
-// read(fd, buf, count) — fd=0 blocks until data is available
+// read(fd, buf, count) - fd=0 blocks until data is available
 static inline long sys_read(int fd, void *buf, size_t count) {
   return syscall3(COREOS_SYS_READ, fd, (long)buf, (long)count);
 }
 
-// write(fd, buf, count) — fd=1 goes to serial
+// write(fd, buf, count) - fd=1 goes to serial
 static inline long sys_write(int fd, const void *buf, size_t count) {
   return syscall3(COREOS_SYS_WRITE, fd, (long)buf, (long)count);
 }
@@ -353,7 +353,7 @@ static inline int sys_close(int fd) {
   return (int)syscall1(COREOS_SYS_CLOSE, fd);
 }
 
-// fsize(fd) — total byte size of open file
+// fsize(fd) - total byte size of open file
 static inline long sys_fsize(int fd) { return syscall1(COREOS_SYS_FSIZE, fd); }
 
 static inline int sys_fstat(int fd, struct stat *st) {
@@ -461,7 +461,7 @@ static inline int sys_pipe2(int pipefd[2], int flags) {
   return (int)syscall2(COREOS_SYS_PIPE2, (long)pipefd, flags);
 }
 
-// execve(path, argv, envp) — spawn RamFS ELF, returns pid or 0
+// execve(path, argv, envp) - spawn RamFS ELF, returns pid or 0
 static inline long sys_exec(const char *path) {
   return syscall3(COREOS_SYS_EXEC, (long)path, 0, 0);
 }
@@ -628,7 +628,7 @@ static inline int sys_arch_prctl(int code, unsigned long addr) {
   return (int)syscall2(COREOS_SYS_ARCH_PRCTL, code, addr);
 }
 
-// waitpid(pid) — block until child exits, returns exit code
+// waitpid(pid) - block until child exits, returns exit code
 static inline long sys_waitpid(long pid) {
   return syscall1(COREOS_SYS_WAITPID, pid);
 }
@@ -644,7 +644,7 @@ static inline void sys_exit_group(int code) {
   __builtin_unreachable();
 }
 
-// brk(addr) — returns new break
+// brk(addr) - returns new break
 static inline long sys_brk(long addr) { return syscall1(COREOS_SYS_BRK, addr); }
 
 static inline long sys_meminfo() { return syscall1(COREOS_SYS_FREE_BYTES, 0); }

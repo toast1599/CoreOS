@@ -158,7 +158,7 @@ pub unsafe fn exec_as_task(elf_data: &[u8], name: &[char]) -> (usize, usize) {
     };
 
     // -----------------------------------------------------------------------
-    // 2. Allocate user stack — must be contiguous so the full 64 KB is usable.
+    // 2. Allocate user stack - must be contiguous so the full 64 KB is usable.
     //    alloc_frames() returns the base address of a contiguous block.
     // -----------------------------------------------------------------------
     let user_stack_base = USER_STACK_TOP - USER_STACK_PAGES * PAGE_SIZE;

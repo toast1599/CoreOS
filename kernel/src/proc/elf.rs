@@ -6,7 +6,7 @@
 /// allocates physical pages via the PMM, copies PT_LOAD segments into place,
 /// and returns the entry point address.
 ///
-/// Does NOT set up page tables or drop to ring 3 — that is the caller's job.
+/// Does NOT set up page tables or drop to ring 3 - that is the caller's job.
 use crate::mem::pmm::PAGE_SIZE;
 
 // ---------------------------------------------------------------------------

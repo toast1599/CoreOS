@@ -1,4 +1,4 @@
-; syscall.asm — raw x86_64 syscall wrappers
+; syscall.asm - raw x86_64 syscall wrappers
 ; Calling convention: System V AMD64 (rdi, rsi, rdx, r10, r8, r9)
 ; Linux syscall convention:  rax=num, rdi=arg1, rsi=arg2, rdx=arg3
 ; Note: in syscall convention arg4 uses r10 (not rcx, which is clobbered by syscall)

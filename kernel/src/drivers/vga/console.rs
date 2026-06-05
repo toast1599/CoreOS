@@ -7,7 +7,7 @@ use core::fmt::Write;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 // ---------------------------------------------------------------------------
-// Global output cursor — shared between kernel and userspace output path.
+// Global output cursor - shared between kernel and userspace output path.
 // Protected by cli/sti at call sites (single-core).
 // ---------------------------------------------------------------------------
 

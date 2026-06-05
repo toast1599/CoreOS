@@ -1,9 +1,9 @@
-// libcshim.c — minimal libc implementation for CoreOS userspace
+// libcshim.c - minimal libc implementation for CoreOS userspace
 #include "libcshim.h"
 #include <stdarg.h>
 
 // ---------------------------------------------------------------------------
-// I/O (thin wrappers — the real implementations are inline in libcshim.h)
+// I/O (thin wrappers - the real implementations are inline in libcshim.h)
 // ---------------------------------------------------------------------------
 
 ssize_t read(int fd, void *buf, size_t count) {
@@ -276,7 +276,7 @@ int stat(const char *path, struct stat *st) {
 }
 
 // ---------------------------------------------------------------------------
-// printf — lightweight, no malloc needed
+// printf - lightweight, no malloc needed
 // ---------------------------------------------------------------------------
 
 static void _puts_noln(const char *s) {
@@ -417,7 +417,7 @@ int memcmp(const void *a, const void *b, size_t n) {
 }
 
 // ---------------------------------------------------------------------------
-// Heap — bump allocator over brk()
+// Heap - bump allocator over brk()
 //
 // FIX: was calling _sys_brk() (undefined) instead of sys_brk().
 //      sys_brk(0) returns the current break; sys_brk(addr) sets it.
@@ -449,7 +449,7 @@ void *malloc(size_t size) {
         char *requested = current_end + extra;
         char *got = (char *)sys_brk((long)requested);
         if (got < new_ptr) {
-            // OOM — kernel didn't extend far enough.
+            // OOM - kernel didn't extend far enough.
             return NULL;
         }
     }
@@ -459,7 +459,7 @@ void *malloc(size_t size) {
 }
 
 void free(void *ptr) {
-    (void)ptr;  // bump allocator — no-op until musl lands
+    (void)ptr;  // bump allocator - no-op until musl lands
 }
 
 // ---------------------------------------------------------------------------

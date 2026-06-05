@@ -13,7 +13,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 // ---------------------------------------------------------------------------
-// Context — kernel state the commands need to access
+// Context - kernel state the commands need to access
 // ---------------------------------------------------------------------------
 
 pub struct ShellContext<'a> {
@@ -25,7 +25,7 @@ pub struct ShellContext<'a> {
 }
 
 // ---------------------------------------------------------------------------
-// Output — what the UI should do after a command runs
+// Output - what the UI should do after a command runs
 // ---------------------------------------------------------------------------
 
 pub enum ShellOutput {

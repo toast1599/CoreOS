@@ -29,23 +29,23 @@ unsafe fn outb(port: u16, val: u8) {
 /// Remap both PICs and apply IRQ masks.
 /// Must be called before `sti`.
 pub unsafe fn init() {
-    // ICW1 — start init on both PICs
+    // ICW1 - start init on both PICs
     outb(PIC1_CMD, ICW1_INIT);
     outb(PIC2_CMD, ICW1_INIT);
 
-    // ICW2 — vector offsets
+    // ICW2 - vector offsets
     outb(PIC1_DATA, 0x20); // master IRQs → vectors 0x20–0x27
     outb(PIC2_DATA, 0x28); // slave  IRQs → vectors 0x28–0x2F
 
-    // ICW3 — cascade wiring
+    // ICW3 - cascade wiring
     outb(PIC1_DATA, 0x04); // master: slave on IRQ2
     outb(PIC2_DATA, 0x02); // slave:  cascade identity 2
 
-    // ICW4 — 8086 mode
+    // ICW4 - 8086 mode
     outb(PIC1_DATA, ICW4_8086);
     outb(PIC2_DATA, ICW4_8086);
 
-    // OCW1 — set IRQ masks
+    // OCW1 - set IRQ masks
     outb(PIC1_DATA, MASTER_MASK);
     outb(PIC2_DATA, SLAVE_MASK);
 

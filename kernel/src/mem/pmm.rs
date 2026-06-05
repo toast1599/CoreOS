@@ -1,4 +1,4 @@
-/// Physical Memory Manager (PMM) — bitmap allocator.
+/// Physical Memory Manager (PMM) - bitmap allocator.
 use crate::boot::{CoreOS_BootInfo, EFI_CONVENTIONAL_MEMORY};
 use core::ptr::addr_of;
 

@@ -1,4 +1,4 @@
-/// Task management — kernel stacks + round-robin scheduler support.
+/// Task management - kernel stacks + round-robin scheduler support.
 use crate::mem::pmm::{alloc_frames, PAGE_SIZE};
 use crate::syscall::types::SyscallFrame;
 use core::cell::UnsafeCell;
@@ -321,7 +321,7 @@ pub fn task_frame_mut(slot: usize) -> Option<&'static mut SyscallFrame> {
     Some(unsafe { &mut *(frame_ptr as *mut SyscallFrame) })
 }
 
-/// Trampoline — called via ret from switch_to,
+/// Trampoline - called via ret from switch_to,
 /// Stack at entry:
 /// [entry: u64, stack_top: u64, pml4: u64]
 /// Drops to ring 3 via iretq.

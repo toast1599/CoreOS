@@ -11,7 +11,7 @@ pub const TEXT_COLOR: u32 = 0xFFE6E1CF;
 pub const CLOCK_COLOR: u32 = 0xFFF5C2E7;
 
 // ---------------------------------------------------------------------------
-// Global framebuffer state — set once at boot, used by syscall write()
+// Global framebuffer state - set once at boot, used by syscall write()
 // ---------------------------------------------------------------------------
 
 pub(super) static FB_BASE: AtomicUsize = AtomicUsize::new(0);

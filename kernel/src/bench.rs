@@ -1,4 +1,4 @@
-/// bench.rs — Boot-time performance stamps.
+/// bench.rs - Boot-time performance stamps.
 ///
 /// Records TSC cycle counts at key points during kernel initialisation.
 /// Results are displayed via the `boottime` shell command.
@@ -102,7 +102,7 @@ pub fn set_bootloader_tsc(tsc: u64) {
 }
 
 // ---------------------------------------------------------------------------
-// Report — called by `boottime` shell command
+// Report - called by `boottime` shell command
 // ---------------------------------------------------------------------------
 
 /// Returns a formatted boot timing report as an alloc::string::String.

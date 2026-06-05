@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 #![allow(unused_variables)]
 
-/// Shell — input buffer management and command dispatch.
+/// Shell - input buffer management and command dispatch.
 ///
 /// The shell owns a fixed-size character buffer and a cursor position.
 /// `execute()` parses the current buffer and dispatches to the command
